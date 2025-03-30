@@ -27,3 +27,7 @@ Automates parking spot checks for Munich Airport.
 ```bash
 git clone https://github.com/damodaje/ai-experiments.git
 cd ai-experiments
+
+## License
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
