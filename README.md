@@ -21,6 +21,9 @@ Automates parking spot checks for Munich Airport.
 - Expand to flight price monitoring based on airline availability and price criteria.
 - Potentially enable auto-booking with user confirmation.
 
+## License
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
 ## Setup
 
 ### 1. Clone the Repository
@@ -28,6 +31,5 @@ Automates parking spot checks for Munich Airport.
 git clone https://github.com/damodaje/ai-experiments.git
 cd ai-experiments
 
-## License
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
 
