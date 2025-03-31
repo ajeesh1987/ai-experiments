@@ -140,52 +140,68 @@ def scrape_booking_site(page, booking):
 
     # Handle cookie pop-ups (improved for OneTrust)
     try:
+        # Prioritize "Accept" buttons over "Preferences"
         cookie_selectors = [
-            "[aria-label*='cookie' i]",
-            "[id*='cookie']",
-            "[class*='cookie']",
-            "button:has-text('Accept')",
-            "button:has-text('Agree')",
-            "button:has-text('I Accept')",
+            "button#onetrust-accept-btn-handler",  # Direct "Accept" button
             "button:has-text('Accept All Cookies')",
+            "button:has-text('Accept')",
+            "button:has-text('I Accept')",
+            "button:has-text('Agree')",
             "button:has-text('Allow')",
             "button:has-text('Confirm')",
             "button:has-text('OK')",
-            "button#onetrust-accept-btn-handler",
-            "button#onetrust-pc-btn-handler",
             "button[class*='accept']",
             "button[class*='agree']",
             "button[class*='ot-btn']",
             "button[id*='accept']",
             "button[role='button'][class*='cookie']",
-            "button[class*='save-preference-btn']",  # OneTrust save button
+            "[aria-label*='cookie' i]",  # Moved to lower priority
+            "[id*='cookie']",
+            "[class*='cookie']",
+            "button#onetrust-pc-btn-handler",  # Preferences button (last resort)
+            "button[class*='save-preference-btn']",
         ]
         cookie_selector = find_element(page, cookie_selectors, timeout=10000, retries=3, delay=2)
         print(f"Found cookie popup button with selector: {cookie_selector}")
+
+        # Get the button's text for debugging
+        button_text = page.evaluate(f"document.querySelector('{cookie_selector}').innerText")
+        print(f"Clicked button with text: {button_text}")
 
         # Try Playwright click first
         try:
             page.click(cookie_selector)
         except Exception as e:
             print(f"Playwright click failed: {e}, trying JavaScript click")
-            # Fallback to JavaScript click
             page.evaluate(f"document.querySelector('{cookie_selector}').click()")
 
-        # If we clicked the preferences button, we might need to save or accept
-        if "onetrust-pc-btn-handler" in cookie_selector or "save-preference" in cookie_selector:
+        # If we clicked the preferences button, handle the settings modal
+        if "onetrust-pc-btn-handler" in cookie_selector or "save-preference" in cookie_selector or "cookie-setting" in button_text.lower():
+            print("Detected preferences button, looking for save/confirm button")
             save_selectors = [
                 "button:has-text('Save')",
                 "button:has-text('Accept')",
                 "button:has-text('Confirm')",
+                "button:has-text('OK')",
                 "button[class*='save']",
                 "button[class*='ot-btn']",
+                "button[class*='confirm']",
+                "button[id*='confirm']",
             ]
-            save_selector = find_element(page, save_selectors, timeout=3000)
+            save_selector = find_element(page, save_selectors, timeout=5000)
+            print(f"Found save/confirm button with selector: {save_selector}")
             page.click(save_selector)
 
-        # Wait for the popup to disappear
-        page.wait_for_selector(".onetrust-pc-dark-filter", state="hidden", timeout=10000)
-        print("Cookie popup dismissed successfully")
+        # Wait for the popup to disappear with a longer timeout
+        try:
+            page.wait_for_selector(".onetrust-pc-dark-filter", state="hidden", timeout=15000)
+            print("Cookie popup dismissed successfully")
+        except Exception as e:
+            print(f"Overlay still present: {e}, attempting to hide via JavaScript")
+            # Fallback: Hide the overlay using JavaScript
+            page.evaluate("document.querySelector('.onetrust-pc-dark-filter').style.display = 'none';")
+            page.evaluate("document.querySelector('#onetrust-consent-sdk').style.display = 'none';")
+            print("Overlay hidden via JavaScript")
     except Exception as e:
         print(f"Failed to handle cookie popup: {e}")
         pass
