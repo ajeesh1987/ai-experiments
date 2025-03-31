@@ -9,7 +9,6 @@ import os
 os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
 def get_user_input():
-    # Check if config.json exists
     try:
         with open("config.json", "r") as f:
             config = json.load(f)
@@ -64,7 +63,6 @@ def send_gui_alert(booking_type, target, details=""):
         print(f"Failed to display GUI alert: {e}")
 
 def find_element(page, selectors, timeout=5000):
-    """Try multiple selectors to find an element."""
     for selector in selectors:
         try:
             page.wait_for_selector(selector, timeout=timeout)
@@ -74,7 +72,6 @@ def find_element(page, selectors, timeout=5000):
     raise Exception(f"Could not find element with selectors: {selectors}")
 
 def find_search_bar(page):
-    """Dynamically find the search bar or search icon."""
     search_selectors = [
         "input[id*='search']",
         "input[class*='search']",
@@ -89,7 +86,6 @@ def find_search_bar(page):
     return selector
 
 def find_date_picker(page, target_date):
-    """Dynamically find the date picker and select the target date."""
     date_selectors = [
         "select[id*='date']",
         "input[id*='date']",
@@ -102,7 +98,6 @@ def find_date_picker(page, target_date):
     return selector, date_ui
 
 def find_theater_selector(page, theater_name):
-    """Dynamically find the theater selector."""
     theater_selectors = [
         "select[id*='venue']",
         "select[id*='theater']",
@@ -115,7 +110,6 @@ def find_theater_selector(page, theater_name):
     return selector
 
 def find_submit_button(page):
-    """Dynamically find the submit button."""
     submit_selectors = [
         "button[type='submit']",
         "button[id*='submit']",
@@ -139,7 +133,7 @@ def scrape_booking_site(page, booking):
         print(f"Error loading page: {e}")
         return False
 
-    # Handle cookie pop-ups (improved for OneTrust and other common popups)
+    # Handle cookie pop-ups (improved for OneTrust)
     try:
         cookie_selectors = [
             "[aria-label*='cookie' i]",
@@ -148,12 +142,15 @@ def scrape_booking_site(page, booking):
             "button:has-text('Accept')",
             "button:has-text('Agree')",
             "button:has-text('I Accept')",
-            "button#onetrust-accept-btn-handler",  # OneTrust accept button
-            "button#onetrust-pc-btn-handler",     # OneTrust preferences button
+            "button:has-text('Accept All Cookies')",  # Common OneTrust text
+            "button#onetrust-accept-btn-handler",
+            "button#onetrust-pc-btn-handler",
             "button[class*='accept']",
             "button[class*='agree']",
+            "button[class*='ot-btn']",  # OneTrust button class
+            "button[id*='accept']",
         ]
-        cookie_selector = find_element(page, cookie_selectors, timeout=3000)
+        cookie_selector = find_element(page, cookie_selectors, timeout=5000)  # Increased timeout
         page.click(cookie_selector)
 
         # If we clicked the preferences button, we might need to save or accept
@@ -162,9 +159,13 @@ def scrape_booking_site(page, booking):
                 "button:has-text('Save')",
                 "button:has-text('Accept')",
                 "button[class*='save']",
+                "button[class*='ot-btn']",
             ]
-            save_selector = find_element(page, save_selectors, timeout=1000)
+            save_selector = find_element(page, save_selectors, timeout=2000)
             page.click(save_selector)
+
+        # Wait for the popup to disappear
+        page.wait_for_selector("#onetrust-consent-sdk", state="hidden", timeout=5000)
     except Exception as e:
         print(f"Failed to handle cookie popup: {e}")
         pass
