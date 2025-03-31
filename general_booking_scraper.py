@@ -147,6 +147,7 @@ def find_submit_button(page):
     ]
     selector = find_element(page, submit_selectors)
     return selector
+
 def scrape_booking_site(page, booking):
     url = booking["url"]
     preferences = booking["preferences"]
@@ -268,7 +269,42 @@ def scrape_booking_site(page, booking):
                     slider_input_selector = find_element(page, slider_input_selectors, timeout=3000)
                     print(f"Found input field in slider with selector: {slider_input_selector}")
                     page.fill(slider_input_selector, preferences["movie_title"])
+
+                    # Try pressing Enter first
                     page.press(slider_input_selector, "Enter")
+                    print("Pressed Enter in slider input")
+
+                    # Wait for search results by looking for an element indicating results
+                    result_indicators = [
+                        f":has-text('{preferences['movie_title']}')",
+                        "div[class*='film']",
+                        "div[class*='movie']",
+                        "div[class*='search-result']",
+                        "div[class*='showtime']",
+                    ]
+                    try:
+                        result_selector = find_element(page, result_indicators, timeout=15000)
+                        print(f"Search results loaded, found element with selector: {result_selector}")
+                    except Exception as e:
+                        print(f"Search results not found after pressing Enter: {e}, trying to click a submit button")
+                        # Fallback: Look for a submit button in the slider
+                        submit_selectors = [
+                            f"{slider_selector} button[type='submit']",
+                            f"{slider_selector} button[class*='submit']",
+                            f"{slider_selector} button[class*='search']",
+                            f"{slider_selector} button:has-text('Search')",
+                            f"{slider_selector} button:has-text('Find')",
+                        ]
+                        try:
+                            submit_selector = find_element(page, submit_selectors, timeout=3000)
+                            print(f"Found submit button in slider with selector: {submit_selector}")
+                            page.click(submit_selector)
+                            # Wait for results again
+                            result_selector = find_element(page, result_indicators, timeout=15000)
+                            print(f"Search results loaded after clicking submit, found element with selector: {result_selector}")
+                        except Exception as e:
+                            print(f"Failed to load search results after clicking submit: {e}")
+                            return False
                 except Exception as e:
                     print(f"No slider/sidebar input found: {e}, looking for movie list instead")
 
@@ -302,6 +338,9 @@ def scrape_booking_site(page, booking):
                             if preferences["movie_title"].lower() in element_text:
                                 print(f"Found movie: {preferences['movie_title']}")
                                 element.click()
+                                # Wait for results after clicking the movie
+                                result_selector = find_element(page, result_indicators, timeout=15000)
+                                print(f"Movie details loaded, found element with selector: {result_selector}")
                                 break
                         else:
                             print(f"Movie '{preferences['movie_title']}' not found in list")
@@ -309,9 +348,6 @@ def scrape_booking_site(page, booking):
                     except Exception as e:
                         print(f"Failed to find movie list: {e}")
                         return False
-
-            # Wait for search results to load after pressing Enter
-            page.wait_for_load_state("networkidle", timeout=10000)
     except Exception as e:
         print(f"Error interacting with search bar: {e}")
         return False
@@ -319,7 +355,6 @@ def scrape_booking_site(page, booking):
     # Find and select the date
     try:
         date_selector, date_formats = find_date_picker(page, preferences["show_date"])
-        # Try each date format until a match is found
         for date_ui in date_formats:
             try:
                 date_elements = page.query_selector_all(date_selector)
@@ -387,6 +422,7 @@ def scrape_booking_site(page, booking):
         return False
 
     return False
+
 def main():
     print(f"Starting check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     booking = get_user_input()
