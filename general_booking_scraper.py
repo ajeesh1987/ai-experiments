@@ -93,14 +93,35 @@ def find_search_bar(page):
 def find_date_picker(page, target_date):
     date_selectors = [
         "select[id*='date']",
+        "select[name*='date']",
         "input[id*='date']",
+        "input[type='date']",
         "div[class*='date']",
+        "div[class*='calendar']",
+        "div[class*='day']",
+        "button[class*='date']",
+        "a[class*='date']",
         "[aria-label*='date' i]",
         "[data-test*='date']",
+        "div[role='option'][class*='date']",
+        "a[role='option'][class*='date']",
+        "div[class*='showtime-date']",
+        "button[class*='showtime-date']",
     ]
     selector = find_element(page, date_selectors)
-    date_ui = datetime.strptime(target_date, "%Y-%m-%d").strftime("%d %b")
-    return selector, date_ui
+    # Try multiple date formats
+    date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+    date_formats = [
+        date_obj.strftime("%d %b"),  # 26 May
+        date_obj.strftime("%b %d"),  # May 26
+        date_obj.strftime("%d/%m/%Y"),  # 26/05/2025
+        date_obj.strftime("%Y-%m-%d"),  # 2025-05-26
+        date_obj.strftime("%dth %b"),  # 26th May
+        date_obj.strftime("%d %B"),  # 26 May
+        date_obj.strftime("%B %d"),  # May 26
+        f"{date_obj.day}",  # 26 (for calendar days)
+    ]
+    return selector, date_formats
 
 def find_theater_selector(page, theater_name):
     theater_selectors = [
@@ -126,7 +147,6 @@ def find_submit_button(page):
     ]
     selector = find_element(page, submit_selectors)
     return selector
-
 def scrape_booking_site(page, booking):
     url = booking["url"]
     preferences = booking["preferences"]
@@ -138,7 +158,7 @@ def scrape_booking_site(page, booking):
         print(f"Error loading page: {e}")
         return False
 
-    # Handle cookie pop-ups (already working)
+    # Handle cookie pop-ups
     try:
         cookie_selectors = [
             "button#onetrust-accept-btn-handler",
@@ -205,10 +225,8 @@ def scrape_booking_site(page, booking):
         search_selector = find_search_bar(page)
         if "button" in search_selector:
             page.click(search_selector)
-            # Wait for the DOM to update after clicking the search button
-            page.wait_for_timeout(2000)  # 2-second delay for dynamic content
+            page.wait_for_timeout(2000)  # Wait for dynamic content
 
-            # First, try to find a search input field directly on the page
             search_input_selectors = [
                 "input[id*='search']",
                 "input[class*='search']",
@@ -225,21 +243,19 @@ def scrape_booking_site(page, booking):
             except Exception as e:
                 print(f"No search input found directly on page: {e}, trying slider/sidebar mechanism")
 
-                # Fallback 1: Look for a slider or sidebar (e.g., on myvue.com)
                 slider_selectors = [
                     "div[class*='slider']",
                     "div[class*='sidebar']",
                     "div[class*='panel']",
                     "div[id*='search']",
                     "div[class*='search']",
-                    "div[role='dialog']",  # For modals
+                    "div[role='dialog']",
                     "div[class*='overlay']",
                     "div[class*='drawer']",
                 ]
                 try:
                     slider_selector = find_element(page, slider_selectors, timeout=5000)
                     print(f"Found slider/sidebar with selector: {slider_selector}")
-                    # Look for an input field inside the slider
                     slider_input_selectors = [
                         f"{slider_selector} input[id*='search']",
                         f"{slider_selector} input[class*='search']",
@@ -256,7 +272,6 @@ def scrape_booking_site(page, booking):
                 except Exception as e:
                     print(f"No slider/sidebar input found: {e}, looking for movie list instead")
 
-                    # Fallback 2: Look for a list of movies (dropdown, modal, or search results)
                     movie_list_selectors = [
                         "div[class*='film']",
                         "div[class*='movie']",
@@ -280,7 +295,6 @@ def scrape_booking_site(page, booking):
                     try:
                         movie_list_selector = find_element(page, movie_list_selectors, timeout=5000)
                         print(f"Found movie list with selector: {movie_list_selector}")
-                        # Find the movie matching the title
                         movie_elements = page.query_selector_all(movie_list_selector)
                         for element in movie_elements:
                             element_text = element.inner_text().lower()
@@ -295,14 +309,35 @@ def scrape_booking_site(page, booking):
                     except Exception as e:
                         print(f"Failed to find movie list: {e}")
                         return False
+
+            # Wait for search results to load after pressing Enter
+            page.wait_for_load_state("networkidle", timeout=10000)
     except Exception as e:
         print(f"Error interacting with search bar: {e}")
         return False
 
     # Find and select the date
     try:
-        date_selector, date_ui = find_date_picker(page, preferences["show_date"])
-        page.click(f"{date_selector}:has-text('{date_ui}')")
+        date_selector, date_formats = find_date_picker(page, preferences["show_date"])
+        # Try each date format until a match is found
+        for date_ui in date_formats:
+            try:
+                date_elements = page.query_selector_all(date_selector)
+                for element in date_elements:
+                    element_text = element.inner_text().lower()
+                    print(f"Checking date element: {element_text}")
+                    if date_ui.lower() in element_text:
+                        print(f"Found date: {date_ui}")
+                        element.click()
+                        break
+                else:
+                    continue
+                break
+            except Exception as e:
+                print(f"Failed to find date with format {date_ui}: {e}")
+                continue
+        else:
+            raise Exception(f"Could not find date {preferences['show_date']} in any format")
     except Exception as e:
         print(f"Error selecting date: {e}")
         return False
@@ -352,7 +387,6 @@ def scrape_booking_site(page, booking):
         return False
 
     return False
-
 def main():
     print(f"Starting check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     booking = get_user_input()
