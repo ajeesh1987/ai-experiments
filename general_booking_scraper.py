@@ -2,35 +2,53 @@ import tkinter as tk
 from tkinter import messagebox
 from playwright.sync_api import sync_playwright
 from datetime import datetime
+import json
 
 # Suppress Tk deprecation warning
 import os
 os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
 def get_user_input():
-    print("Welcome to the General Booking Scraper!")
-    booking_type = input("Enter the booking type (e.g., movie, flight, parking): ").strip().lower()
-    
-    if booking_type != "movie":
-        print("Sorry, only 'movie' is supported right now. Exiting.")
-        exit(1)
-
-    url = input("Enter the movie booking site URL (e.g., https://example-movies.com/book): ").strip()
-    movie_title = input("Enter the movie title (e.g., Dune: Part Two): ").strip()
-    show_date = input("Enter the show date (YYYY-MM-DD, e.g., 2025-12-12): ").strip()
-    show_time = input("Enter the preferred show time (HH:MM, e.g., 19:00): ").strip()
-    theater = input("Enter the preferred theater (e.g., AMC Downtown): ").strip()
-
-    return {
-        "type": booking_type,
-        "url": url,
-        "preferences": {
-            "movie_title": movie_title,
-            "show_date": show_date,
-            "show_time": show_time,
-            "theater": theater
+    # Check if config.json exists
+    try:
+        with open("config.json", "r") as f:
+            config = json.load(f)
+        print("Loaded inputs from config.json:")
+        print(json.dumps(config, indent=4))
+        return {
+            "type": config["booking_type"],
+            "url": config["booking_url"],
+            "preferences": {
+                "movie_title": config["movie_title"],
+                "show_date": config["show_date"],
+                "show_time": config["show_time"],
+                "theater": config["preferred_theater"]
+            }
         }
-    }
+    except FileNotFoundError:
+        print("Welcome to the General Booking Scraper!")
+        booking_type = input("Enter the booking type (e.g., movie, flight, parking): ").strip().lower()
+        
+        if booking_type != "movie":
+            print("Sorry, only 'movie' is supported right now. Exiting.")
+            exit(1)
+
+        url = input("Enter the movie booking site URL (e.g., https://example-movies.com/book): ").strip()
+        movie_title = input("Enter the movie title (e.g., Dune: Part Two): ").strip()
+        show_date = input("Enter the show date (YYYY-MM-DD, e.g., 2025-12-12): ").strip()
+        show_time = input("Enter the preferred show time (HH:MM, e.g., 19:00): ").strip()
+        theater = input("Enter the preferred theater (e.g., AMC Downtown): ").strip()
+
+        return {
+            "type": booking_type,
+            "url": url,
+            "preferences": {
+                "movie_title": movie_title,
+                "show_date": show_date,
+                "show_time": show_time,
+                "theater": theater
+            }
+        }
 
 def send_gui_alert(booking_type, target, details=""):
     try:
@@ -57,16 +75,15 @@ def find_element(page, selectors, timeout=5000):
 
 def find_search_bar(page):
     """Dynamically find the search bar or search icon."""
-    # Possible selectors for search bar or icon
     search_selectors = [
-        "input[id*='search']",  # ID contains "search"
-        "input[class*='search']",  # Class contains "search"
-        "input[placeholder*='search' i]",  # Placeholder contains "search" (case-insensitive)
-        "input[aria-label*='search' i]",  # Aria-label contains "search"
-        "button[class*='search']",  # Button with class containing "search"
-        "button[aria-label*='search' i]",  # Button with aria-label containing "search"
-        "[data-test*='search']",  # Data-test attribute containing "search"
-        "input[name*='query']",  # Input with name containing "query"
+        "input[id*='search']",
+        "input[class*='search']",
+        "input[placeholder*='search' i]",
+        "input[aria-label*='search' i]",
+        "button[class*='search']",
+        "button[aria-label*='search' i]",
+        "[data-test*='search']",
+        "input[name*='query']",
     ]
     selector = find_element(page, search_selectors)
     return selector
@@ -74,26 +91,25 @@ def find_search_bar(page):
 def find_date_picker(page, target_date):
     """Dynamically find the date picker and select the target date."""
     date_selectors = [
-        "select[id*='date']",  # ID contains "date"
-        "input[id*='date']",  # ID contains "date"
-        "div[class*='date']",  # Class contains "date"
-        "[aria-label*='date' i]",  # Aria-label contains "date"
-        "[data-test*='date']",  # Data-test attribute containing "date"
+        "select[id*='date']",
+        "input[id*='date']",
+        "div[class*='date']",
+        "[aria-label*='date' i]",
+        "[data-test*='date']",
     ]
     selector = find_element(page, date_selectors)
-    # Format the date for UI (e.g., "12 Dec")
     date_ui = datetime.strptime(target_date, "%Y-%m-%d").strftime("%d %b")
     return selector, date_ui
 
 def find_theater_selector(page, theater_name):
     """Dynamically find the theater selector."""
     theater_selectors = [
-        "select[id*='venue']",  # ID contains "venue"
-        "select[id*='theater']",  # ID contains "theater"
-        "div[class*='venue']",  # Class contains "venue"
-        "div[class*='theater']",  # Class contains "theater"
-        "[aria-label*='theater' i]",  # Aria-label contains "theater"
-        "[data-test*='venue']",  # Data-test attribute containing "venue"
+        "select[id*='venue']",
+        "select[id*='theater']",
+        "div[class*='venue']",
+        "div[class*='theater']",
+        "[aria-label*='theater' i]",
+        "[data-test*='venue']",
     ]
     selector = find_element(page, theater_selectors)
     return selector
@@ -101,13 +117,13 @@ def find_theater_selector(page, theater_name):
 def find_submit_button(page):
     """Dynamically find the submit button."""
     submit_selectors = [
-        "button[type='submit']",  # Standard submit button
-        "button[id*='submit']",  # ID contains "submit"
-        "button[class*='submit']",  # Class contains "submit"
-        "button[aria-label*='submit' i]",  # Aria-label contains "submit"
-        "button:has-text('Find')",  # Button with text "Find"
-        "button:has-text('Search')",  # Button with text "Search"
-        "button:has-text('Book')",  # Button with text "Book"
+        "button[type='submit']",
+        "button[id*='submit']",
+        "button[class*='submit']",
+        "button[aria-label*='submit' i]",
+        "button:has-text('Find')",
+        "button:has-text('Search')",
+        "button:has-text('Book')",
     ]
     selector = find_element(page, submit_selectors)
     return selector
@@ -123,7 +139,7 @@ def scrape_booking_site(page, booking):
         print(f"Error loading page: {e}")
         return False
 
-    # Handle cookie pop-ups (if any)
+    # Handle cookie pop-ups (improved for OneTrust and other common popups)
     try:
         cookie_selectors = [
             "[aria-label*='cookie' i]",
@@ -131,19 +147,33 @@ def scrape_booking_site(page, booking):
             "[class*='cookie']",
             "button:has-text('Accept')",
             "button:has-text('Agree')",
+            "button:has-text('I Accept')",
+            "button#onetrust-accept-btn-handler",  # OneTrust accept button
+            "button#onetrust-pc-btn-handler",     # OneTrust preferences button
+            "button[class*='accept']",
+            "button[class*='agree']",
         ]
-        cookie_selector = find_element(page, cookie_selectors, timeout=1000)
+        cookie_selector = find_element(page, cookie_selectors, timeout=3000)
         page.click(cookie_selector)
-    except:
+
+        # If we clicked the preferences button, we might need to save or accept
+        if "onetrust-pc-btn-handler" in cookie_selector:
+            save_selectors = [
+                "button:has-text('Save')",
+                "button:has-text('Accept')",
+                "button[class*='save']",
+            ]
+            save_selector = find_element(page, save_selectors, timeout=1000)
+            page.click(save_selector)
+    except Exception as e:
+        print(f"Failed to handle cookie popup: {e}")
         pass
 
     # Find and interact with the search bar
     try:
         search_selector = find_search_bar(page)
-        # If it's a button (e.g., search icon), click it to reveal the input
         if "button" in search_selector:
             page.click(search_selector)
-            # Look for the input field that appears
             search_input_selectors = [
                 "input[id*='search']",
                 "input[class*='search']",
@@ -160,7 +190,6 @@ def scrape_booking_site(page, booking):
     # Find and select the date
     try:
         date_selector, date_ui = find_date_picker(page, preferences["show_date"])
-        # Try clicking the date if it's a list of dates
         page.click(f"{date_selector}:has-text('{date_ui}')")
     except Exception as e:
         print(f"Error selecting date: {e}")
@@ -193,9 +222,9 @@ def scrape_booking_site(page, booking):
         result_selector = find_element(page, result_selectors)
         results = page.query_selector_all(result_selector)
         for result in results:
-            movie_element = result.query_selector(":has-text('preferences['movie_title']')")
-            time_element = result.query_selector(":has-text('preferences['show_time']')")
-            theater_element = result.query_selector(":has-text('preferences['theater']')")
+            movie_element = result.query_selector(f":has-text('{preferences['movie_title']}')")
+            time_element = result.query_selector(f":has-text('{preferences['show_time']}')")
+            theater_element = result.query_selector(f":has-text('{preferences['theater']}')")
 
             if (movie_element and preferences["movie_title"].lower() in movie_element.inner_text().lower() and
                 time_element and preferences["show_time"] in time_element.inner_text() and
