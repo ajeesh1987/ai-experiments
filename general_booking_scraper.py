@@ -3,6 +3,7 @@ from tkinter import messagebox
 from playwright.sync_api import sync_playwright
 from datetime import datetime
 import json
+import time
 
 # Suppress Tk deprecation warning
 import os
@@ -62,14 +63,18 @@ def send_gui_alert(booking_type, target, details=""):
     except Exception as e:
         print(f"Failed to display GUI alert: {e}")
 
-def find_element(page, selectors, timeout=5000):
-    for selector in selectors:
-        try:
-            page.wait_for_selector(selector, timeout=timeout)
-            return selector
-        except:
-            continue
-    raise Exception(f"Could not find element with selectors: {selectors}")
+def find_element(page, selectors, timeout=5000, retries=3, delay=1):
+    """Try multiple selectors to find an element with retries."""
+    for attempt in range(retries):
+        for selector in selectors:
+            try:
+                page.wait_for_selector(selector, timeout=timeout)
+                return selector
+            except:
+                continue
+        print(f"Retry {attempt + 1}/{retries} for selectors: {selectors}")
+        time.sleep(delay)
+    raise Exception(f"Could not find element with selectors: {selectors} after {retries} retries")
 
 def find_search_bar(page):
     search_selectors = [
@@ -142,30 +147,45 @@ def scrape_booking_site(page, booking):
             "button:has-text('Accept')",
             "button:has-text('Agree')",
             "button:has-text('I Accept')",
-            "button:has-text('Accept All Cookies')",  # Common OneTrust text
+            "button:has-text('Accept All Cookies')",
+            "button:has-text('Allow')",
+            "button:has-text('Confirm')",
+            "button:has-text('OK')",
             "button#onetrust-accept-btn-handler",
             "button#onetrust-pc-btn-handler",
             "button[class*='accept']",
             "button[class*='agree']",
-            "button[class*='ot-btn']",  # OneTrust button class
+            "button[class*='ot-btn']",
             "button[id*='accept']",
+            "button[role='button'][class*='cookie']",
+            "button[class*='save-preference-btn']",  # OneTrust save button
         ]
-        cookie_selector = find_element(page, cookie_selectors, timeout=5000)  # Increased timeout
-        page.click(cookie_selector)
+        cookie_selector = find_element(page, cookie_selectors, timeout=10000, retries=3, delay=2)
+        print(f"Found cookie popup button with selector: {cookie_selector}")
+
+        # Try Playwright click first
+        try:
+            page.click(cookie_selector)
+        except Exception as e:
+            print(f"Playwright click failed: {e}, trying JavaScript click")
+            # Fallback to JavaScript click
+            page.evaluate(f"document.querySelector('{cookie_selector}').click()")
 
         # If we clicked the preferences button, we might need to save or accept
-        if "onetrust-pc-btn-handler" in cookie_selector:
+        if "onetrust-pc-btn-handler" in cookie_selector or "save-preference" in cookie_selector:
             save_selectors = [
                 "button:has-text('Save')",
                 "button:has-text('Accept')",
+                "button:has-text('Confirm')",
                 "button[class*='save']",
                 "button[class*='ot-btn']",
             ]
-            save_selector = find_element(page, save_selectors, timeout=2000)
+            save_selector = find_element(page, save_selectors, timeout=3000)
             page.click(save_selector)
 
         # Wait for the popup to disappear
-        page.wait_for_selector("#onetrust-consent-sdk", state="hidden", timeout=5000)
+        page.wait_for_selector(".onetrust-pc-dark-filter", state="hidden", timeout=10000)
+        print("Cookie popup dismissed successfully")
     except Exception as e:
         print(f"Failed to handle cookie popup: {e}")
         pass
