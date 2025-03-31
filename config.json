@@ -1,8 +1,14 @@
 {
-    "booking_type": "movie",
-    "booking_url": "https://www.myvue.com/cinema/manchester-printworks/film",
-    "movie_title": "Mission: Impossible - The Final Reckoning",
-    "show_date": "2025-05-26",
-    "show_time": "20:00",
-    "preferred_theater": "printworks"
+  "bookings": [
+    {
+      "url": "https://www.myvue.com/",
+      "type": "movie",
+      "preferences": {
+        "movie_title": "Sikandar",
+        "show_date": "2025-04-03",
+        "show_time": "20:00",
+        "theater": "Manchester Printworks"
+      }
+    }
+  ]
 }
