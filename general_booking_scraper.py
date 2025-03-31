@@ -138,11 +138,10 @@ def scrape_booking_site(page, booking):
         print(f"Error loading page: {e}")
         return False
 
-    # Handle cookie pop-ups (improved for OneTrust)
+    # Handle cookie pop-ups (already working)
     try:
-        # Prioritize "Accept" buttons over "Preferences"
         cookie_selectors = [
-            "button#onetrust-accept-btn-handler",  # Direct "Accept" button
+            "button#onetrust-accept-btn-handler",
             "button:has-text('Accept All Cookies')",
             "button:has-text('Accept')",
             "button:has-text('I Accept')",
@@ -155,27 +154,24 @@ def scrape_booking_site(page, booking):
             "button[class*='ot-btn']",
             "button[id*='accept']",
             "button[role='button'][class*='cookie']",
-            "[aria-label*='cookie' i]",  # Moved to lower priority
+            "[aria-label*='cookie' i]",
             "[id*='cookie']",
             "[class*='cookie']",
-            "button#onetrust-pc-btn-handler",  # Preferences button (last resort)
+            "button#onetrust-pc-btn-handler",
             "button[class*='save-preference-btn']",
         ]
         cookie_selector = find_element(page, cookie_selectors, timeout=10000, retries=3, delay=2)
         print(f"Found cookie popup button with selector: {cookie_selector}")
 
-        # Get the button's text for debugging
         button_text = page.evaluate(f"document.querySelector('{cookie_selector}').innerText")
         print(f"Clicked button with text: {button_text}")
 
-        # Try Playwright click first
         try:
             page.click(cookie_selector)
         except Exception as e:
             print(f"Playwright click failed: {e}, trying JavaScript click")
             page.evaluate(f"document.querySelector('{cookie_selector}').click()")
 
-        # If we clicked the preferences button, handle the settings modal
         if "onetrust-pc-btn-handler" in cookie_selector or "save-preference" in cookie_selector or "cookie-setting" in button_text.lower():
             print("Detected preferences button, looking for save/confirm button")
             save_selectors = [
@@ -192,13 +188,11 @@ def scrape_booking_site(page, booking):
             print(f"Found save/confirm button with selector: {save_selector}")
             page.click(save_selector)
 
-        # Wait for the popup to disappear with a longer timeout
         try:
             page.wait_for_selector(".onetrust-pc-dark-filter", state="hidden", timeout=15000)
             print("Cookie popup dismissed successfully")
         except Exception as e:
             print(f"Overlay still present: {e}, attempting to hide via JavaScript")
-            # Fallback: Hide the overlay using JavaScript
             page.evaluate("document.querySelector('.onetrust-pc-dark-filter').style.display = 'none';")
             page.evaluate("document.querySelector('#onetrust-consent-sdk').style.display = 'none';")
             print("Overlay hidden via JavaScript")
@@ -211,15 +205,96 @@ def scrape_booking_site(page, booking):
         search_selector = find_search_bar(page)
         if "button" in search_selector:
             page.click(search_selector)
+            # Wait for the DOM to update after clicking the search button
+            page.wait_for_timeout(2000)  # 2-second delay for dynamic content
+
+            # First, try to find a search input field directly on the page
             search_input_selectors = [
                 "input[id*='search']",
                 "input[class*='search']",
                 "input[placeholder*='search' i]",
                 "input[aria-label*='search' i]",
+                "input[name*='search']",
+                "input[type='search']",
             ]
-            search_selector = find_element(page, search_input_selectors)
-        page.fill(search_selector, preferences["movie_title"])
-        page.press(search_selector, "Enter")
+            try:
+                search_selector = find_element(page, search_input_selectors, timeout=3000)
+                print(f"Found search input directly on page with selector: {search_selector}")
+                page.fill(search_selector, preferences["movie_title"])
+                page.press(search_selector, "Enter")
+            except Exception as e:
+                print(f"No search input found directly on page: {e}, trying slider/sidebar mechanism")
+
+                # Fallback 1: Look for a slider or sidebar (e.g., on myvue.com)
+                slider_selectors = [
+                    "div[class*='slider']",
+                    "div[class*='sidebar']",
+                    "div[class*='panel']",
+                    "div[id*='search']",
+                    "div[class*='search']",
+                    "div[role='dialog']",  # For modals
+                    "div[class*='overlay']",
+                    "div[class*='drawer']",
+                ]
+                try:
+                    slider_selector = find_element(page, slider_selectors, timeout=5000)
+                    print(f"Found slider/sidebar with selector: {slider_selector}")
+                    # Look for an input field inside the slider
+                    slider_input_selectors = [
+                        f"{slider_selector} input[id*='search']",
+                        f"{slider_selector} input[class*='search']",
+                        f"{slider_selector} input[placeholder*='search' i]",
+                        f"{slider_selector} input[aria-label*='search' i]",
+                        f"{slider_selector} input[name*='search']",
+                        f"{slider_selector} input[type='search']",
+                        f"{slider_selector} input[type='text']",
+                    ]
+                    slider_input_selector = find_element(page, slider_input_selectors, timeout=3000)
+                    print(f"Found input field in slider with selector: {slider_input_selector}")
+                    page.fill(slider_input_selector, preferences["movie_title"])
+                    page.press(slider_input_selector, "Enter")
+                except Exception as e:
+                    print(f"No slider/sidebar input found: {e}, looking for movie list instead")
+
+                    # Fallback 2: Look for a list of movies (dropdown, modal, or search results)
+                    movie_list_selectors = [
+                        "div[class*='film']",
+                        "div[class*='movie']",
+                        "li[class*='film']",
+                        "li[class*='movie']",
+                        "a[class*='film']",
+                        "a[class*='movie']",
+                        "[data-test*='film']",
+                        "[data-test*='movie']",
+                        "div[class*='search-result']",
+                        "li[class*='search-result']",
+                        "a[class*='search-result']",
+                        "div[class*='dropdown']",
+                        "li[class*='dropdown']",
+                        "a[class*='dropdown']",
+                        "div[role='option']",
+                        "a[role='option']",
+                        "div[class*='item']",
+                        "a[class*='item']",
+                    ]
+                    try:
+                        movie_list_selector = find_element(page, movie_list_selectors, timeout=5000)
+                        print(f"Found movie list with selector: {movie_list_selector}")
+                        # Find the movie matching the title
+                        movie_elements = page.query_selector_all(movie_list_selector)
+                        for element in movie_elements:
+                            element_text = element.inner_text().lower()
+                            print(f"Checking movie element: {element_text}")
+                            if preferences["movie_title"].lower() in element_text:
+                                print(f"Found movie: {preferences['movie_title']}")
+                                element.click()
+                                break
+                        else:
+                            print(f"Movie '{preferences['movie_title']}' not found in list")
+                            return False
+                    except Exception as e:
+                        print(f"Failed to find movie list: {e}")
+                        return False
     except Exception as e:
         print(f"Error interacting with search bar: {e}")
         return False
