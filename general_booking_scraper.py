@@ -221,178 +221,427 @@ def scrape_booking_site(page, booking):
         print(f"Failed to handle cookie popup: {e}")
         pass
 
-    # Find and interact with the search bar
+    # Try using the Quick Book section first (e.g., on myvue.com)
     try:
-        search_selector = find_search_bar(page)
-        if "button" in search_selector:
-            page.click(search_selector)
-            page.wait_for_timeout(2000)  # Wait for dynamic content
+        quick_book_selectors = [
+            "div[class*='quick-book']",
+            "[data-test*='quick-book']",
+        ]
+        quick_book_selector = find_element(page, quick_book_selectors, timeout=5000)
+        print(f"Found Quick Book section with selector: {quick_book_selector}")
 
-            search_input_selectors = [
-                "input[id*='search']",
-                "input[class*='search']",
-                "input[placeholder*='search' i]",
-                "input[aria-label*='search' i]",
-                "input[name*='search']",
-                "input[type='search']",
-            ]
+        # Step 1: Select the venue
+        try:
+            venue_selector_button = find_element(page, ["[data-test='quick-book-venue-selector'] button[data-test='dropdown-opener']"], timeout=3000)
+            print(f"Found venue dropdown button with selector: {venue_selector_button}")
+            page.click(venue_selector_button)
+            venue_selector = find_theater_selector(page, preferences["theater"])
+            page.click(f"{venue_selector}:has-text('{preferences['theater']}')")
+            print(f"Selected venue: {preferences['theater']}")
+        except Exception as e:
+            print(f"Error selecting venue: {e}, assuming default venue is already selected")
+
+        # Step 2: Select the film
+        try:
+            film_selector_button = find_element(page, ["[data-test='quick-book-film-selector'] button[data-test='dropdown-opener']"], timeout=3000)
+            print(f"Found film dropdown button with selector: {film_selector_button}")
+            page.click(film_selector_button)
+
+            # Look for the search input in the film dropdown
+            film_search_input = find_element(page, ["[data-test='quick-book-dropdown-search-input']"], timeout=3000)
+            print(f"Found film search input with selector: {film_search_input}")
+            page.fill(film_search_input, preferences["movie_title"])
+
+            # Wait for the filtered list and select the movie
+            film_item_selector = "li[class*='items-selector-content__item']"
+            page.wait_for_timeout(1000)  # Wait for the list to filter
+            film_items = page.query_selector_all(film_item_selector)
+            for item in film_items:
+                item_text = item.inner_text().lower()
+                print(f"Checking film item: {item_text}")
+                if preferences["movie_title"].lower() in item_text:
+                    print(f"Found movie: {preferences['movie_title']}")
+                    item.click()
+                    break
+            else:
+                print(f"Movie '{preferences['movie_title']}' not found in Quick Book list, falling back to search bar")
+                raise Exception("Movie not found in Quick Book list")
+        except Exception as e:
+            print(f"Error selecting film in Quick Book: {e}, falling back to search bar")
+
+            # Fallback to search bar/slider mechanism
             try:
-                search_selector = find_element(page, search_input_selectors, timeout=3000)
-                print(f"Found search input directly on page with selector: {search_selector}")
-                page.fill(search_selector, preferences["movie_title"])
-                page.press(search_selector, "Enter")
-            except Exception as e:
-                print(f"No search input found directly on page: {e}, trying slider/sidebar mechanism")
+                search_selector = find_search_bar(page)
+                if "button" in search_selector:
+                    page.click(search_selector)
+                    page.wait_for_timeout(2000)
 
-                slider_selectors = [
-                    "div[class*='slider']",
-                    "div[class*='sidebar']",
-                    "div[class*='panel']",
-                    "div[id*='search']",
-                    "div[class*='search']",
-                    "div[role='dialog']",
-                    "div[class*='overlay']",
-                    "div[class*='drawer']",
-                ]
-                try:
-                    slider_selector = find_element(page, slider_selectors, timeout=5000)
-                    print(f"Found slider/sidebar with selector: {slider_selector}")
-                    slider_input_selectors = [
-                        f"{slider_selector} input[id*='search']",
-                        f"{slider_selector} input[class*='search']",
-                        f"{slider_selector} input[placeholder*='search' i]",
-                        f"{slider_selector} input[aria-label*='search' i]",
-                        f"{slider_selector} input[name*='search']",
-                        f"{slider_selector} input[type='search']",
-                        f"{slider_selector} input[type='text']",
-                    ]
-                    slider_input_selector = find_element(page, slider_input_selectors, timeout=3000)
-                    print(f"Found input field in slider with selector: {slider_input_selector}")
-                    page.fill(slider_input_selector, preferences["movie_title"])
-
-                    # Try pressing Enter first
-                    page.press(slider_input_selector, "Enter")
-                    print("Pressed Enter in slider input")
-
-                    # Wait for search results by looking for an element indicating results
-                    result_indicators = [
-                        f":has-text('{preferences['movie_title']}')",
-                        "div[class*='film']",
-                        "div[class*='movie']",
-                        "div[class*='search-result']",
-                        "div[class*='showtime']",
+                    search_input_selectors = [
+                        "input[id*='search']",
+                        "input[class*='search']",
+                        "input[placeholder*='search' i]",
+                        "input[aria-label*='search' i]",
+                        "input[name*='search']",
+                        "input[type='search']",
                     ]
                     try:
-                        result_selector = find_element(page, result_indicators, timeout=15000)
-                        print(f"Search results loaded, found element with selector: {result_selector}")
+                        search_selector = find_element(page, search_input_selectors, timeout=3000)
+                        print(f"Found search input directly on page with selector: {search_selector}")
+                        page.fill(search_selector, preferences["movie_title"])
+                        page.press(search_selector, "Enter")
                     except Exception as e:
-                        print(f"Search results not found after pressing Enter: {e}, trying to click a submit button")
-                        # Fallback: Look for a submit button in the slider
-                        submit_selectors = [
-                            f"{slider_selector} button[type='submit']",
-                            f"{slider_selector} button[class*='submit']",
-                            f"{slider_selector} button[class*='search']",
-                            f"{slider_selector} button:has-text('Search')",
-                            f"{slider_selector} button:has-text('Find')",
+                        print(f"No search input found directly on page: {e}, trying slider/sidebar mechanism")
+
+                        slider_selectors = [
+                            "div[class*='slider']",
+                            "div[class*='sidebar']",
+                            "div[class*='panel']",
+                            "div[id*='search']",
+                            "div[class*='search']",
+                            "div[role='dialog']",
+                            "div[class*='overlay']",
+                            "div[class*='drawer']",
                         ]
                         try:
-                            submit_selector = find_element(page, submit_selectors, timeout=3000)
-                            print(f"Found submit button in slider with selector: {submit_selector}")
-                            page.click(submit_selector)
-                            # Wait for results again
-                            result_selector = find_element(page, result_indicators, timeout=15000)
-                            print(f"Search results loaded after clicking submit, found element with selector: {result_selector}")
-                        except Exception as e:
-                            print(f"Failed to load search results after clicking submit: {e}")
-                            return False
-                except Exception as e:
-                    print(f"No slider/sidebar input found: {e}, looking for movie list instead")
+                            slider_selector = find_element(page, slider_selectors, timeout=5000)
+                            print(f"Found slider/sidebar with selector: {slider_selector}")
+                            slider_input_selectors = [
+                                f"{slider_selector} input[id*='search']",
+                                f"{slider_selector} input[class*='search']",
+                                f"{slider_selector} input[placeholder*='search' i]",
+                                f"{slider_selector} input[aria-label*='search' i]",
+                                f"{slider_selector} input[name*='search']",
+                                f"{slider_selector} input[type='search']",
+                                f"{slider_selector} input[type='text']",
+                            ]
+                            slider_input_selector = find_element(page, slider_input_selectors, timeout=3000)
+                            print(f"Found input field in slider with selector: {slider_input_selector}")
+                            page.fill(slider_input_selector, preferences["movie_title"])
+                            page.press(slider_input_selector, "Enter")
+                            print("Pressed Enter in slider input")
 
-                    movie_list_selectors = [
-                        "div[class*='film']",
-                        "div[class*='movie']",
-                        "li[class*='film']",
-                        "li[class*='movie']",
-                        "a[class*='film']",
-                        "a[class*='movie']",
-                        "[data-test*='film']",
-                        "[data-test*='movie']",
-                        "div[class*='search-result']",
-                        "li[class*='search-result']",
-                        "a[class*='search-result']",
-                        "div[class*='dropdown']",
-                        "li[class*='dropdown']",
-                        "a[class*='dropdown']",
-                        "div[role='option']",
-                        "a[role='option']",
-                        "div[class*='item']",
-                        "a[class*='item']",
+                            result_indicators = [
+                                f":has-text('{preferences['movie_title']}')",
+                                "div[class*='film']",
+                                "div[class*='movie']",
+                                "div[class*='search-result']",
+                                "div[class*='showtime']",
+                            ]
+                            try:
+                                result_selector = find_element(page, result_indicators, timeout=15000)
+                                print(f"Search results loaded, found element with selector: {result_selector}")
+                            except Exception as e:
+                                print(f"Search results not found after pressing Enter: {e}, trying to click a submit button")
+                                submit_selectors = [
+                                    f"{slider_selector} button[type='submit']",
+                                    f"{slider_selector} button[class*='submit']",
+                                    f"{slider_selector} button[class*='search']",
+                                    f"{slider_selector} button:has-text('Search')",
+                                    f"{slider_selector} button:has-text('Find')",
+                                ]
+                                try:
+                                    submit_selector = find_element(page, submit_selectors, timeout=3000)
+                                    print(f"Found submit button in slider with selector: {submit_selector}")
+                                    page.click(submit_selector)
+                                    result_selector = find_element(page, result_indicators, timeout=15000)
+                                    print(f"Search results loaded after clicking submit, found element with selector: {result_selector}")
+                                except Exception as e:
+                                    print(f"Failed to load search results after clicking submit: {e}")
+                                    return False
+                        except Exception as e:
+                            print(f"No slider/sidebar input found: {e}, looking for movie list instead")
+
+                            movie_list_selectors = [
+                                "div[class*='film']",
+                                "div[class*='movie']",
+                                "li[class*='film']",
+                                "li[class*='movie']",
+                                "a[class*='film']",
+                                "a[class*='movie']",
+                                "[data-test*='film']",
+                                "[data-test*='movie']",
+                                "div[class*='search-result']",
+                                "li[class*='search-result']",
+                                "a[class*='search-result']",
+                                "div[class*='dropdown']",
+                                "li[class*='dropdown']",
+                                "a[class*='dropdown']",
+                                "div[role='option']",
+                                "a[role='option']",
+                                "div[class*='item']",
+                                "a[class*='item']",
+                            ]
+                            try:
+                                movie_list_selector = find_element(page, movie_list_selectors, timeout=5000)
+                                print(f"Found movie list with selector: {movie_list_selector}")
+                                movie_elements = page.query_selector_all(movie_list_selector)
+                                for element in movie_elements:
+                                    element_text = element.inner_text().lower()
+                                    print(f"Checking movie element: {element_text}")
+                                    if preferences["movie_title"].lower() in element_text:
+                                        print(f"Found movie: {preferences['movie_title']}")
+                                        element.click()
+                                        result_selector = find_element(page, result_indicators, timeout=15000)
+                                        print(f"Movie details loaded, found element with selector: {result_selector}")
+                                        break
+                                else:
+                                    print(f"Movie '{preferences['movie_title']}' not found in list")
+                                    return False
+                            except Exception as e:
+                                print(f"Failed to find movie list: {e}")
+                                return False
+            except Exception as e:
+                print(f"Error interacting with search bar: {e}")
+                return False
+
+        # Step 3: Select the date
+        try:
+            date_selector_button = find_element(page, ["[data-test='quick-book-date-selector'] button[data-test='dropdown-opener']"], timeout=3000)
+            print(f"Found date dropdown button with selector: {date_selector_button}")
+            page.click(date_selector_button)
+
+            date_selector, date_formats = find_date_picker(page, preferences["show_date"])
+            for date_ui in date_formats:
+                try:
+                    date_elements = page.query_selector_all(date_selector)
+                    for element in date_elements:
+                        element_text = element.inner_text().lower()
+                        print(f"Checking date element: {element_text}")
+                        if date_ui.lower() in element_text:
+                            print(f"Found date: {date_ui}")
+                            element.click()
+                            break
+                    else:
+                        continue
+                    break
+                except Exception as e:
+                    print(f"Failed to find date with format {date_ui}: {e}")
+                    continue
+            else:
+                raise Exception(f"Could not find date {preferences['show_date']} in any format")
+        except Exception as e:
+            print(f"Error selecting date: {e}")
+            return False
+
+        # Step 4: Select the time
+        try:
+            # Wait for the time dropdown to be enabled after selecting the date
+            page.wait_for_timeout(2000)  # Wait for the time dropdown to populate
+            time_selector_button = find_element(page, ["[data-test='quick-book-time-selector'] button[data-test='dropdown-opener']"], timeout=5000)
+            print(f"Found time dropdown button with selector: {time_selector_button}")
+
+            # Check if the time dropdown is disabled
+            is_disabled = page.eval_on_selector(time_selector_button, "el => el.closest('.quick-book__list-item').classList.contains('quick-book__list-item-disabled')")
+            if is_disabled:
+                print("Time dropdown is still disabled, waiting longer")
+                page.wait_for_timeout(3000)  # Wait longer for the dropdown to enable
+                is_disabled = page.eval_on_selector(time_selector_button, "el => el.closest('.quick-book__list-item').classList.contains('quick-book__list-item-disabled')")
+                if is_disabled:
+                    raise Exception("Time dropdown remained disabled after waiting")
+
+            page.click(time_selector_button)
+
+            time_selector, time_formats = find_time_picker(page, preferences["show_time"])
+            for time_ui in time_formats:
+                try:
+                    time_elements = page.query_selector_all(time_selector)
+                    for element in time_elements:
+                        element_text = element.inner_text().lower()
+                        print(f"Checking time element: {element_text}")
+                        if time_ui.lower() in element_text:
+                            print(f"Found time: {time_ui}")
+                            element.click()
+                            break
+                    else:
+                        continue
+                    break
+                except Exception as e:
+                    print(f"Failed to find time with format {time_ui}: {e}")
+                    continue
+            else:
+                raise Exception(f"Could not find time {preferences['show_time']} in any format")
+        except Exception as e:
+            print(f"Error selecting time: {e}")
+            return False
+
+        # Step 5: Click the Search button
+        try:
+            submit_selector = find_submit_button(page)
+            print(f"Found submit button with selector: {submit_selector}")
+            page.click(submit_selector)
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception as e:
+            print(f"Error submitting Quick Book form: {e}")
+            return False
+
+    except Exception as e:
+        print(f"Quick Book section not found or failed: {e}, falling back to search bar mechanism")
+        # Fallback to search bar/slider mechanism
+        try:
+            search_selector = find_search_bar(page)
+            if "button" in search_selector:
+                page.click(search_selector)
+                page.wait_for_timeout(2000)
+
+                search_input_selectors = [
+                    "input[id*='search']",
+                    "input[class*='search']",
+                    "input[placeholder*='search' i]",
+                    "input[aria-label*='search' i]",
+                    "input[name*='search']",
+                    "input[type='search']",
+                ]
+                try:
+                    search_selector = find_element(page, search_input_selectors, timeout=3000)
+                    print(f"Found search input directly on page with selector: {search_selector}")
+                    page.fill(search_selector, preferences["movie_title"])
+                    page.press(search_selector, "Enter")
+                except Exception as e:
+                    print(f"No search input found directly on page: {e}, trying slider/sidebar mechanism")
+
+                    slider_selectors = [
+                        "div[class*='slider']",
+                        "div[class*='sidebar']",
+                        "div[class*='panel']",
+                        "div[id*='search']",
+                        "div[class*='search']",
+                        "div[role='dialog']",
+                        "div[class*='overlay']",
+                        "div[class*='drawer']",
                     ]
                     try:
-                        movie_list_selector = find_element(page, movie_list_selectors, timeout=5000)
-                        print(f"Found movie list with selector: {movie_list_selector}")
-                        movie_elements = page.query_selector_all(movie_list_selector)
-                        for element in movie_elements:
-                            element_text = element.inner_text().lower()
-                            print(f"Checking movie element: {element_text}")
-                            if preferences["movie_title"].lower() in element_text:
-                                print(f"Found movie: {preferences['movie_title']}")
-                                element.click()
-                                # Wait for results after clicking the movie
+                        slider_selector = find_element(page, slider_selectors, timeout=5000)
+                        print(f"Found slider/sidebar with selector: {slider_selector}")
+                        slider_input_selectors = [
+                            f"{slider_selector} input[id*='search']",
+                            f"{slider_selector} input[class*='search']",
+                            f"{slider_selector} input[placeholder*='search' i]",
+                            f"{slider_selector} input[aria-label*='search' i]",
+                            f"{slider_selector} input[name*='search']",
+                            f"{slider_selector} input[type='search']",
+                            f"{slider_selector} input[type='text']",
+                        ]
+                        slider_input_selector = find_element(page, slider_input_selectors, timeout=3000)
+                        print(f"Found input field in slider with selector: {slider_input_selector}")
+                        page.fill(slider_input_selector, preferences["movie_title"])
+                        page.press(slider_input_selector, "Enter")
+                        print("Pressed Enter in slider input")
+
+                        result_indicators = [
+                            f":has-text('{preferences['movie_title']}')",
+                            "div[class*='film']",
+                            "div[class*='movie']",
+                            "div[class*='search-result']",
+                            "div[class*='showtime']",
+                        ]
+                        try:
+                            result_selector = find_element(page, result_indicators, timeout=15000)
+                            print(f"Search results loaded, found element with selector: {result_selector}")
+                        except Exception as e:
+                            print(f"Search results not found after pressing Enter: {e}, trying to click a submit button")
+                            submit_selectors = [
+                                f"{slider_selector} button[type='submit']",
+                                f"{slider_selector} button[class*='submit']",
+                                f"{slider_selector} button[class*='search']",
+                                f"{slider_selector} button:has-text('Search')",
+                                f"{slider_selector} button:has-text('Find')",
+                            ]
+                            try:
+                                submit_selector = find_element(page, submit_selectors, timeout=3000)
+                                print(f"Found submit button in slider with selector: {submit_selector}")
+                                page.click(submit_selector)
                                 result_selector = find_element(page, result_indicators, timeout=15000)
-                                print(f"Movie details loaded, found element with selector: {result_selector}")
+                                print(f"Search results loaded after clicking submit, found element with selector: {result_selector}")
+                            except Exception as e:
+                                print(f"Failed to load search results after clicking submit: {e}")
+                                return False
+                    except Exception as e:
+                        print(f"No slider/sidebar input found: {e}, looking for movie list instead")
+
+                        movie_list_selectors = [
+                            "div[class*='film']",
+                            "div[class*='movie']",
+                            "li[class*='film']",
+                            "li[class*='movie']",
+                            "a[class*='film']",
+                            "a[class*='movie']",
+                            "[data-test*='film']",
+                            "[data-test*='movie']",
+                            "div[class*='search-result']",
+                            "li[class*='search-result']",
+                            "a[class*='search-result']",
+                            "div[class*='dropdown']",
+                            "li[class*='dropdown']",
+                            "a[class*='dropdown']",
+                            "div[role='option']",
+                            "a[role='option']",
+                            "div[class*='item']",
+                            "a[class*='item']",
+                        ]
+                        try:
+                            movie_list_selector = find_element(page, movie_list_selectors, timeout=5000)
+                            print(f"Found movie list with selector: {movie_list_selector}")
+                            movie_elements = page.query_selector_all(movie_list_selector)
+                            for element in movie_elements:
+                                element_text = element.inner_text().lower()
+                                print(f"Checking movie element: {element_text}")
+                                if preferences["movie_title"].lower() in element_text:
+                                    print(f"Found movie: {preferences['movie_title']}")
+                                    element.click()
+                                    result_selector = find_element(page, result_indicators, timeout=15000)
+                                    print(f"Movie details loaded, found element with selector: {result_selector}")
+                                    break
+                            else:
+                                print(f"Movie '{preferences['movie_title']}' not found in list")
+                                return False
+                        except Exception as e:
+                            print(f"Failed to find movie list: {e}")
+                            return False
+            except Exception as e:
+                print(f"Error interacting with search bar: {e}")
+                return False
+
+            # Find and select the date (for fallback path)
+            try:
+                date_selector, date_formats = find_date_picker(page, preferences["show_date"])
+                for date_ui in date_formats:
+                    try:
+                        date_elements = page.query_selector_all(date_selector)
+                        for element in date_elements:
+                            element_text = element.inner_text().lower()
+                            print(f"Checking date element: {element_text}")
+                            if date_ui.lower() in element_text:
+                                print(f"Found date: {date_ui}")
+                                element.click()
                                 break
                         else:
-                            print(f"Movie '{preferences['movie_title']}' not found in list")
-                            return False
-                    except Exception as e:
-                        print(f"Failed to find movie list: {e}")
-                        return False
-    except Exception as e:
-        print(f"Error interacting with search bar: {e}")
-        return False
-
-    # Find and select the date
-    try:
-        date_selector, date_formats = find_date_picker(page, preferences["show_date"])
-        for date_ui in date_formats:
-            try:
-                date_elements = page.query_selector_all(date_selector)
-                for element in date_elements:
-                    element_text = element.inner_text().lower()
-                    print(f"Checking date element: {element_text}")
-                    if date_ui.lower() in element_text:
-                        print(f"Found date: {date_ui}")
-                        element.click()
+                            continue
                         break
+                    except Exception as e:
+                        print(f"Failed to find date with format {date_ui}: {e}")
+                        continue
                 else:
-                    continue
-                break
+                    raise Exception(f"Could not find date {preferences['show_date']} in any format")
             except Exception as e:
-                print(f"Failed to find date with format {date_ui}: {e}")
-                continue
-        else:
-            raise Exception(f"Could not find date {preferences['show_date']} in any format")
-    except Exception as e:
-        print(f"Error selecting date: {e}")
-        return False
+                print(f"Error selecting date: {e}")
+                return False
 
-    # Find and select the theater
-    try:
-        theater_selector = find_theater_selector(page, preferences["theater"])
-        page.click(f"{theater_selector}:has-text('{preferences['theater']}')")
-    except Exception as e:
-        print(f"Error selecting theater: {e}")
-        return False
+            # Find and select the theater (for fallback path)
+            try:
+                theater_selector = find_theater_selector(page, preferences["theater"])
+                page.click(f"{theater_selector}:has-text('{preferences['theater']}')")
+            except Exception as e:
+                print(f"Error selecting theater: {e}")
+                return False
 
-    # Find and click the submit button
-    try:
-        submit_selector = find_submit_button(page)
-        page.click(submit_selector)
-        page.wait_for_load_state("networkidle", timeout=8000)
-    except Exception as e:
-        print(f"Error submitting form: {e}")
-        return False
+            # Find and click the submit button (for fallback path)
+            try:
+                submit_selector = find_submit_button(page)
+                page.click(submit_selector)
+                page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception as e:
+                print(f"Error submitting form: {e}")
+                return False
 
     # Scrape results
     try:
