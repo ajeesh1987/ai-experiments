@@ -91,15 +91,6 @@ def scrape_myvue(page, booking):
         page.goto(url, timeout=60000, wait_until="domcontentloaded")
     handle_cookies(page)
 
-    # Monitor network requests for showtime API calls
-    showtime_request_detected = False
-    def handle_request(request):
-        nonlocal showtime_request_detected
-        if "showtimes" in request.url.lower() or "api" in request.url.lower():
-            print(f"Detected potential showtime API request: {request.url}")
-            showtime_request_detected = True
-    page.on("request", handle_request)
-
     try:
         # Step 1: Open venue dropdown
         venue_button = find_element(page, ["button[data-test='dropdown-opener'] span:has-text('VENUE')"])
@@ -229,11 +220,18 @@ def scrape_myvue(page, booking):
             except Exception:
                 print(f"No loading indicator found or it did not disappear for {date_text}")
 
-            # Wait for potential API request
-            if showtime_request_detected:
-                print(f"Waiting for showtime API request to complete for {date_text}")
-                page.wait_for_timeout(5000)
-                showtime_request_detected = False
+            # Wait for and capture the showtime API response
+            showtime_api_url_pattern = "*/api/microservice/showings/cinemas?filmId=*"
+            try:
+                response = page.wait_for_response(showtime_api_url_pattern, timeout=15000)
+                response_json = response.json()
+                print(f"Showtime API response for {date_text}: {json.dumps(response_json, indent=2)}")
+            except Exception as e:
+                print(f"Failed to capture showtime API response for {date_text}: {e}")
+                response_json = {}
+
+            # Wait longer after API response to ensure DOM updates
+            page.wait_for_timeout(10000)
 
             # Check time dropdown state
             time_selector_container = "[data-test='quick-book-time-selector']"
@@ -309,7 +307,7 @@ def scrape_myvue(page, booking):
                     attributes.append(special_elem.inner_text().strip())
                 attributes_str = ", ".join(attributes) if attributes else "No attributes"
 
-                time_info = f"{start_time}{end_time} ({screen}, {attributes_str})"
+                time_info = f"{start_time} - {end_time} ({screen}, {attributes_str})"
                 available_times.append(time_info)
 
             if available_times:
@@ -350,28 +348,14 @@ def main():
         context = browser.new_context(viewport={"width": 1280, "height": 720})
         page = context.new_page()
 
-        # Loop to periodically check for showtimes
-        max_attempts = 5  # Check 5 times (e.g., every 24 hours for 5 days)
-        check_interval = 24 * 60 * 60  # 24 hours in seconds
-        for attempt in range(max_attempts):
-            print(f"\nAttempt {attempt + 1}/{max_attempts} to find showtimes")
-            for booking in bookings:
-                if booking["type"] != "movie":
-                    print(f"Skipping {booking['type']} - only 'movie' supported")
-                    continue
-                print(f"Checking {booking['type']} booking for {booking['preferences']['movie_title']}...")
-                result = scrape_myvue(page, booking)
-                print(f"Search completed: {result}")
-                if result:
-                    print(f"{booking['type'].capitalize()} found! Stopping further checks.")
-                    context.close()
-                    browser.close()
-                    return
-            if attempt < max_attempts - 1:
-                print(f"No showtimes found. Waiting {check_interval / 3600} hours before the next check...")
-                time.sleep(check_interval)
+        for booking in bookings:
+            if booking["type"] != "movie":
+                print(f"Skipping {booking['type']} - only 'movie' supported")
+                continue
+            print(f"Checking {booking['type']} booking for {booking['preferences']['movie_title']}...")
+            result = scrape_myvue(page, booking)
+            print(f"Search completed: {result}")
 
-        print("Max attempts reached. No showtimes found after all checks.")
         context.close()
         browser.close()
 
