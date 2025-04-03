@@ -18,7 +18,7 @@ Automates parking spot checks for Munich Airport.
 - Runs hourly using the `schedule` library.
 - Displays a GUI alert when the spot ("Economy Parken Nord P44 Parkhaus") is found.
 
-### 'general_booking_scraper.py'
+### `general_booking_scraper.py`
 Automates movie showtime checks on the Vue Cinemas website (https://www.myvue.com/).
 **Features:**
 Searches for a specified movie at a chosen Vue theater.
@@ -36,12 +36,12 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Setup
 
-### 1. Clone the Repository
+
+### 1. Clone the Repository and Run script
 ```bash
 git clone https://github.com/damodaje/ai-experiments.git
 cd ai-experiments
-
-### 2. Run the script
 python3 general_booking_scraper.py
 
 
+=
