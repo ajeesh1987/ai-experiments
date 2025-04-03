@@ -45,5 +45,3 @@ git clone https://github.com/damodaje/ai-experiments.git
 cd ai-experiments
 python3 general_booking_scraper.py
 
-
-=
