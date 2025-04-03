@@ -23,10 +23,10 @@ Automates movie showtime checks on the Vue Cinemas website (https://www.myvue.co
 
 
 **Features:**
-Searches for a specified movie at a chosen Vue theater.
-Supports flexible movie name matching (e.g., "final reckoning" matches "Mission Impossible: Final Reckoning").
-Displays a GUI alert when the movie is available for booking (e.g., "Sikandar booking has opened, check showtimes and book").
-Designed to run once and can be scheduled using a cron job.
+- Searches for a specified movie at a chosen Vue theater.
+- Supports flexible movie name matching (e.g., "final reckoning" matches "Mission Impossible: Final Reckoning").
+- Displays a GUI alert when the movie is available for booking (e.g., "Sikandar booking has opened, check showtimes and book").
+- Designed to run once and can be scheduled using a cron job.
 
 **Future Plans:**
 - Add text message alerts for instant notifications.
