@@ -163,10 +163,11 @@ def scrape_myvue(page, booking):
         film_items = page.query_selector_all(f"{film_container} li[class*='items-selector-content__item']")
         print("Movies after search:")
         movie_found = False
+        normalized_target = normalize_text(preferences["movie_title"]).lower()
         for item in film_items:
             movie_text = normalize_text(item.inner_text())
             print(f" - {movie_text} (raw: '{item.inner_text()}')")
-            if normalize_text(preferences["movie_title"]).lower() == movie_text.lower():
+            if normalized_target == movie_text.lower():
                 click_with_retry(page, item)
                 print(f"Selected movie: {movie_text}")
                 movie_found = True
@@ -175,7 +176,7 @@ def scrape_myvue(page, booking):
             # Fallback: Partial match
             for item in film_items:
                 movie_text = normalize_text(item.inner_text())
-                if normalize_text(preferences["movie_title"]).lower() in movie_text.lower():
+                if normalized_target in movie_text.lower():
                     click_with_retry(page, item)
                     print(f"Selected movie (partial match): {movie_text}")
                     movie_found = True
@@ -217,20 +218,28 @@ def scrape_myvue(page, booking):
                 continue
 
             # Wait for the page to update
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)  # Increased wait for page to update
 
-            # Check if time dropdown is enabled
+            # Check time dropdown state
             time_selector_container = "[data-test='quick-book-time-selector']"
             time_button = f"{time_selector_container} button[data-test='dropdown-opener']"
             time_container = page.query_selector(time_selector_container)
-            if time_container and "quick-book__list-item-disabled" in time_container.get_attribute("class"):
-                print(f"No showtimes available for {date_text} (time dropdown disabled)")
-                # Reopen date dropdown for the next iteration
+            if time_container:
+                time_classes = time_container.get_attribute("class")
+                print(f"Time dropdown classes for {date_text}: {time_classes}")
+                if "quick-book__list-item-disabled" in time_classes:
+                    print(f"No showtimes available for {date_text} (time dropdown disabled)")
+                    # Reopen date dropdown for the next iteration
+                    page.click(date_button, force=True)
+                    page.wait_for_timeout(1000)
+                    continue
+            else:
+                print(f"Time dropdown not found for {date_text}")
                 page.click(date_button, force=True)
                 page.wait_for_timeout(1000)
                 continue
 
-            # Open time dropdown
+            # Attempt to open time dropdown
             time_element = page.query_selector(time_button)
             try:
                 click_with_retry(page, time_element)
@@ -256,6 +265,10 @@ def scrape_myvue(page, booking):
                 print(f"Showtimes for {date_text}: {', '.join(available_times)}")
             else:
                 print(f"No showtimes available for {date_text} (no times listed)")
+                # Debug: Check if there's a loading state
+                loading_indicator = page.query_selector("[data-test='quick-book-time-selector'] .loading")
+                if loading_indicator:
+                    print(f"Loading indicator present for {date_text}")
 
             # Reopen date dropdown for the next iteration
             page.click(date_button, force=True)
