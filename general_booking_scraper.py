@@ -9,7 +9,7 @@ from tkinter import messagebox
 # Suppress Tkinter deprecation warning
 os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
-# GUI alert function using tkinter (only for successful finds)
+# GUI alert function using tkinter
 def send_gui_alert(title, message):
     root = tk.Tk()
     root.withdraw()  # Hide the main window
@@ -195,144 +195,16 @@ def scrape_myvue(page, booking):
         for date in available_dates:
             print(f" - {date}")
 
-        # Step 4: Check showtimes for each date
-        showtimes_found = False
-        showtimes_by_date = {}
-        for date_text in available_dates:
-            # Select the date with retry
-            date_selector = f"{date_container} li[class*='items-selector-content__item']:has-text('{date_text}')"
-            date_element = page.query_selector(date_selector)
-            try:
-                click_with_retry(page, date_element)
-                print(f"Selected date: {date_text}")
-            except Exception as e:
-                print(f"Failed to select date {date_text}: {e}")
-                continue
-
-            # Wait for the page to update (increased wait time)
-            page.wait_for_timeout(10000)
-
-            # Check for loading state
-            loading_selector = "[data-test='quick-book-time-selector'] .loading"
-            try:
-                page.wait_for_selector(loading_selector, state="detached", timeout=15000)
-                print(f"Loading indicator for {date_text} has disappeared")
-            except Exception:
-                print(f"No loading indicator found or it did not disappear for {date_text}")
-
-            # Wait for and capture the showtime API response
-            showtime_api_url_pattern = "*/api/microservice/showings/cinemas?filmId=*"
-            try:
-                response = page.wait_for_response(showtime_api_url_pattern, timeout=15000)
-                response_json = response.json()
-                print(f"Showtime API response for {date_text}: {json.dumps(response_json, indent=2)}")
-            except Exception as e:
-                print(f"Failed to capture showtime API response for {date_text}: {e}")
-                response_json = {}
-
-            # Wait longer after API response to ensure DOM updates
-            page.wait_for_timeout(10000)
-
-            # Check time dropdown state
-            time_selector_container = "[data-test='quick-book-time-selector']"
-            time_button = f"{time_selector_container} button[data-test='dropdown-opener']"
-            time_container = page.query_selector(time_selector_container)
-            if time_container:
-                time_classes = time_container.get_attribute("class")
-                print(f"Time dropdown classes for {date_text}: {time_classes}")
-            else:
-                print(f"Time dropdown not found for {date_text}")
-                page.click(date_button, force=True)
-                page.wait_for_timeout(1000)
-                continue
-
-            # Attempt to open time dropdown
-            time_element = page.query_selector(time_button)
-            try:
-                click_with_retry(page, time_element)
-                print("Opened time dropdown")
-                page.wait_for_timeout(1000)
-            except Exception as e:
-                print(f"Failed to open time dropdown for {date_text}: {e}")
-                if time_container:
-                    time_html = time_container.inner_html()
-                    print(f"Time dropdown HTML for {date_text}: {time_html}")
-                page.click(date_button, force=True)
-                page.wait_for_timeout(1000)
-                continue
-
-            # Wait for showtimes to load (increased timeout)
-            showtime_selector = f"{time_selector_container} li.dropdown-item.items-selector-content__item.time-selector-item"
-            for attempt in range(3):
-                try:
-                    page.wait_for_selector(showtime_selector, timeout=15000)
-                    print(f"Showtimes loaded for {date_text}")
-                    break
-                except Exception:
-                    print(f"Attempt {attempt + 1}/3: No showtimes loaded for {date_text} after waiting")
-                    page.wait_for_timeout(5000)
-            else:
-                print(f"No showtimes loaded for {date_text} after all attempts")
-                if time_container:
-                    time_html = time_container.inner_html()
-                    print(f"Time dropdown HTML for {date_text}: {time_html}")
-                page.click(date_button, force=True)
-                page.wait_for_timeout(1000)
-                continue
-
-            # Get available times
-            time_items = page.query_selector_all(showtime_selector)
-            available_times = []
-            for item in time_items:
-                start_time_elem = item.query_selector("span.session-time-start")
-                start_time = start_time_elem.inner_text().strip() if start_time_elem else "Unknown start time"
-                
-                session_time_elem = item.query_selector("span.session-time")
-                if session_time_elem:
-                    session_time_text = session_time_elem.inner_text().strip()
-                    time_parts = session_time_text.split(" - ")
-                    end_time = time_parts[1].strip() if len(time_parts) > 1 else "Unknown end time"
-                else:
-                    end_time = "Unknown end time"
-
-                screen_elem = item.query_selector("span.session-screen-name")
-                screen = screen_elem.inner_text().strip() if screen_elem else "Unknown screen"
-
-                attributes = []
-                language_elem = item.query_selector("span.session-attributes-language span")
-                if language_elem:
-                    attributes.append(language_elem.inner_text().strip())
-                special_elem = item.query_selector("span.session-attributes-special span")
-                if special_elem:
-                    attributes.append(special_elem.inner_text().strip())
-                attributes_str = ", ".join(attributes) if attributes else "No attributes"
-
-                time_info = f"{start_time} - {end_time} ({screen}, {attributes_str})"
-                available_times.append(time_info)
-
-            if available_times:
-                showtimes_found = True
-                showtimes_by_date[date_text] = available_times
-                print(f"Showtimes for {date_text}: {', '.join(available_times)}")
-            else:
-                print(f"No showtimes available for {date_text} (no times listed)")
-                if time_container:
-                    time_html = time_container.inner_html()
-                    print(f"Time dropdown HTML for {date_text}: {time_html}")
-
-            page.click(date_button, force=True)
-            page.wait_for_timeout(1000)
-
-        # Step 5: Send GUI alert if showtimes are found
-        if showtimes_found:
-            details = "\n".join([f"{date}: {', '.join(times)}" for date, times in showtimes_by_date.items()])
+        # Step 4: Check if dates are available and send alert
+        if available_dates:
             send_gui_alert(
-                f"{booking_type.capitalize()} Found!",
-                f"{preferences['movie_title']} is available at {theater}.\nDetails:\n{details}\nBook now at {url}."
+                f"{booking_type.capitalize()} Booking Available!",
+                f"Movie booking has opened, check showtimes and book."
             )
+            print("GUI alert sent: Movie booking has opened, check showtimes and book.")
             return True
         else:
-            print(f"No showtimes found for {preferences['movie_title']} at {theater} from {available_dates[0]} to {available_dates[-1]}")
+            print(f"No dates available for {preferences['movie_title']} at {theater}")
             return False
 
     except Exception as e:
