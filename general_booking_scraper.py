@@ -91,6 +91,15 @@ def scrape_myvue(page, booking):
         page.goto(url, timeout=60000, wait_until="domcontentloaded")
     handle_cookies(page)
 
+    # Monitor network requests for showtime API calls
+    showtime_request_detected = False
+    def handle_request(request):
+        nonlocal showtime_request_detected
+        if "showtimes" in request.url.lower() or "api" in request.url.lower():
+            print(f"Detected potential showtime API request: {request.url}")
+            showtime_request_detected = True
+    page.on("request", handle_request)
+
     try:
         # Step 1: Open venue dropdown
         venue_button = find_element(page, ["button[data-test='dropdown-opener'] span:has-text('VENUE')"])
@@ -133,7 +142,7 @@ def scrape_myvue(page, booking):
         film_button = find_element(page, ["[data-test='quick-book-film-selector'] button[data-test='dropdown-opener']"])
         page.click(film_button)
         print("Opened film dropdown")
-        page.wait_for_timeout(5000)  # Increased wait time for dropdown to load
+        page.wait_for_timeout(5000)
 
         # Ensure dropdown is open
         film_dropdown_body = find_element(page, ["[data-test='quick-book-film-selector'] div.dropdown-body.show"], timeout=10000)
@@ -150,10 +159,10 @@ def scrape_myvue(page, booking):
                 print(f" - {movie_text} (raw: '{item.inner_text()}')")
                 available_movies.append(movie_text)
 
-        # Search for movie
+        # Search for movie with flexible matching
         film_input = find_element(page, ["[data-test='quick-book-dropdown-search-input']"])
         page.fill(film_input, preferences["movie_title"])
-        page.wait_for_timeout(3000)  # Increased wait for search to filter results
+        page.wait_for_timeout(3000)
 
         # Re-check dropdown state
         page.wait_for_selector("[data-test='quick-book-film-selector'] div.dropdown-body.show", timeout=5000)
@@ -163,24 +172,16 @@ def scrape_myvue(page, booking):
         film_items = page.query_selector_all(f"{film_container} li[class*='items-selector-content__item']")
         print("Movies after search:")
         movie_found = False
-        normalized_target = normalize_text(preferences["movie_title"]).lower()
+        target_movie = preferences["movie_title"].lower()
         for item in film_items:
-            movie_text = normalize_text(item.inner_text())
+            movie_text = normalize_text(item.inner_text()).lower()
             print(f" - {movie_text} (raw: '{item.inner_text()}')")
-            if normalized_target == movie_text.lower():
+            # Match "Sikandar" with or without "(Hindi)"
+            if target_movie in movie_text or f"{target_movie} (hindi)" in movie_text:
                 click_with_retry(page, item)
                 print(f"Selected movie: {movie_text}")
                 movie_found = True
                 break
-        if not movie_found:
-            # Fallback: Partial match
-            for item in film_items:
-                movie_text = normalize_text(item.inner_text())
-                if normalized_target in movie_text.lower():
-                    click_with_retry(page, item)
-                    print(f"Selected movie (partial match): {movie_text}")
-                    movie_found = True
-                    break
         if not movie_found:
             error_msg = f"Movie {preferences['movie_title']} not found in dropdown. Available movies: {', '.join(available_movies)}"
             print(error_msg)
@@ -217,16 +218,22 @@ def scrape_myvue(page, booking):
                 print(f"Failed to select date {date_text}: {e}")
                 continue
 
-            # Wait for the page to update
-            page.wait_for_timeout(5000)  # Increased wait for page to update
+            # Wait for the page to update (increased wait time)
+            page.wait_for_timeout(10000)
 
             # Check for loading state
             loading_selector = "[data-test='quick-book-time-selector'] .loading"
             try:
-                page.wait_for_selector(loading_selector, state="detached", timeout=10000)
+                page.wait_for_selector(loading_selector, state="detached", timeout=15000)
                 print(f"Loading indicator for {date_text} has disappeared")
             except Exception:
                 print(f"No loading indicator found or it did not disappear for {date_text}")
+
+            # Wait for potential API request
+            if showtime_request_detected:
+                print(f"Waiting for showtime API request to complete for {date_text}")
+                page.wait_for_timeout(5000)
+                showtime_request_detected = False
 
             # Check time dropdown state
             time_selector_container = "[data-test='quick-book-time-selector']"
@@ -249,26 +256,28 @@ def scrape_myvue(page, booking):
                 page.wait_for_timeout(1000)
             except Exception as e:
                 print(f"Failed to open time dropdown for {date_text}: {e}")
-                # Log the HTML for debugging
                 if time_container:
                     time_html = time_container.inner_html()
                     print(f"Time dropdown HTML for {date_text}: {time_html}")
-                # Reopen date dropdown for the next iteration
                 page.click(date_button, force=True)
                 page.wait_for_timeout(1000)
                 continue
 
-            # Wait for showtimes to load
+            # Wait for showtimes to load (increased timeout)
             showtime_selector = f"{time_selector_container} li.dropdown-item.items-selector-content__item.time-selector-item"
-            try:
-                page.wait_for_selector(showtime_selector, timeout=10000)
-                print(f"Showtimes loaded for {date_text}")
-            except Exception:
-                print(f"No showtimes loaded for {date_text} after waiting")
-                # Log the HTML for debugging
-                time_html = time_container.inner_html()
-                print(f"Time dropdown HTML for {date_text}: {time_html}")
-                # Reopen date dropdown for the next iteration
+            for attempt in range(3):
+                try:
+                    page.wait_for_selector(showtime_selector, timeout=15000)
+                    print(f"Showtimes loaded for {date_text}")
+                    break
+                except Exception:
+                    print(f"Attempt {attempt + 1}/3: No showtimes loaded for {date_text} after waiting")
+                    page.wait_for_timeout(5000)
+            else:
+                print(f"No showtimes loaded for {date_text} after all attempts")
+                if time_container:
+                    time_html = time_container.inner_html()
+                    print(f"Time dropdown HTML for {date_text}: {time_html}")
                 page.click(date_button, force=True)
                 page.wait_for_timeout(1000)
                 continue
@@ -277,25 +286,20 @@ def scrape_myvue(page, booking):
             time_items = page.query_selector_all(showtime_selector)
             available_times = []
             for item in time_items:
-                # Extract start time
                 start_time_elem = item.query_selector("span.session-time-start")
                 start_time = start_time_elem.inner_text().strip() if start_time_elem else "Unknown start time"
                 
-                # Extract end time (it's the text after the start time within session-time)
                 session_time_elem = item.query_selector("span.session-time")
                 if session_time_elem:
                     session_time_text = session_time_elem.inner_text().strip()
-                    # Split by " - " to get start and end times
                     time_parts = session_time_text.split(" - ")
                     end_time = time_parts[1].strip() if len(time_parts) > 1 else "Unknown end time"
                 else:
                     end_time = "Unknown end time"
 
-                # Extract screen name
                 screen_elem = item.query_selector("span.session-screen-name")
                 screen = screen_elem.inner_text().strip() if screen_elem else "Unknown screen"
 
-                # Extract attributes (e.g., "Hindi", "Laser")
                 attributes = []
                 language_elem = item.query_selector("span.session-attributes-language span")
                 if language_elem:
@@ -305,7 +309,6 @@ def scrape_myvue(page, booking):
                     attributes.append(special_elem.inner_text().strip())
                 attributes_str = ", ".join(attributes) if attributes else "No attributes"
 
-                # Combine the information
                 time_info = f"{start_time}{end_time} ({screen}, {attributes_str})"
                 available_times.append(time_info)
 
@@ -315,11 +318,10 @@ def scrape_myvue(page, booking):
                 print(f"Showtimes for {date_text}: {', '.join(available_times)}")
             else:
                 print(f"No showtimes available for {date_text} (no times listed)")
-                # Log the HTML for debugging
-                time_html = time_container.inner_html()
-                print(f"Time dropdown HTML for {date_text}: {time_html}")
+                if time_container:
+                    time_html = time_container.inner_html()
+                    print(f"Time dropdown HTML for {date_text}: {time_html}")
 
-            # Reopen date dropdown for the next iteration
             page.click(date_button, force=True)
             page.wait_for_timeout(1000)
 
@@ -332,7 +334,7 @@ def scrape_myvue(page, booking):
             )
             return True
         else:
-            print(f"No showtimes found for {preferences['movie_title']} at {theater}")
+            print(f"No showtimes found for {preferences['movie_title']} at {theater} from {available_dates[0]} to {available_dates[-1]}")
             return False
 
     except Exception as e:
@@ -348,16 +350,28 @@ def main():
         context = browser.new_context(viewport={"width": 1280, "height": 720})
         page = context.new_page()
 
-        for booking in bookings:
-            if booking["type"] != "movie":
-                print(f"Skipping {booking['type']} - only 'movie' supported")
-                continue
-            print(f"Checking {booking['type']} booking for {booking['preferences']['movie_title']}...")
-            result = scrape_myvue(page, booking)
-            print(f"Search completed: {result}")
-            if result:
-                print(f"{booking['type'].capitalize()} found!")
+        # Loop to periodically check for showtimes
+        max_attempts = 5  # Check 5 times (e.g., every 24 hours for 5 days)
+        check_interval = 24 * 60 * 60  # 24 hours in seconds
+        for attempt in range(max_attempts):
+            print(f"\nAttempt {attempt + 1}/{max_attempts} to find showtimes")
+            for booking in bookings:
+                if booking["type"] != "movie":
+                    print(f"Skipping {booking['type']} - only 'movie' supported")
+                    continue
+                print(f"Checking {booking['type']} booking for {booking['preferences']['movie_title']}...")
+                result = scrape_myvue(page, booking)
+                print(f"Search completed: {result}")
+                if result:
+                    print(f"{booking['type'].capitalize()} found! Stopping further checks.")
+                    context.close()
+                    browser.close()
+                    return
+            if attempt < max_attempts - 1:
+                print(f"No showtimes found. Waiting {check_interval / 3600} hours before the next check...")
+                time.sleep(check_interval)
 
+        print("Max attempts reached. No showtimes found after all checks.")
         context.close()
         browser.close()
 
