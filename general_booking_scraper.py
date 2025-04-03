@@ -235,16 +235,13 @@ def scrape_myvue(page, booking):
             if time_container:
                 time_classes = time_container.get_attribute("class")
                 print(f"Time dropdown classes for {date_text}: {time_classes}")
-                # Log the inner HTML of the time dropdown for debugging
-                time_html = time_container.inner_html()
-                print(f"Time dropdown HTML for {date_text}: {time_html}")
             else:
                 print(f"Time dropdown not found for {date_text}")
                 page.click(date_button, force=True)
                 page.wait_for_timeout(1000)
                 continue
 
-            # Attempt to open time dropdown regardless of disabled state
+            # Attempt to open time dropdown
             time_element = page.query_selector(time_button)
             try:
                 click_with_retry(page, time_element)
@@ -252,24 +249,75 @@ def scrape_myvue(page, booking):
                 page.wait_for_timeout(1000)
             except Exception as e:
                 print(f"Failed to open time dropdown for {date_text}: {e}")
+                # Log the HTML for debugging
+                if time_container:
+                    time_html = time_container.inner_html()
+                    print(f"Time dropdown HTML for {date_text}: {time_html}")
+                # Reopen date dropdown for the next iteration
+                page.click(date_button, force=True)
+                page.wait_for_timeout(1000)
+                continue
+
+            # Wait for showtimes to load
+            showtime_selector = f"{time_selector_container} li.dropdown-item.items-selector-content__item.time-selector-item"
+            try:
+                page.wait_for_selector(showtime_selector, timeout=10000)
+                print(f"Showtimes loaded for {date_text}")
+            except Exception:
+                print(f"No showtimes loaded for {date_text} after waiting")
+                # Log the HTML for debugging
+                time_html = time_container.inner_html()
+                print(f"Time dropdown HTML for {date_text}: {time_html}")
                 # Reopen date dropdown for the next iteration
                 page.click(date_button, force=True)
                 page.wait_for_timeout(1000)
                 continue
 
             # Get available times
-            time_items = page.query_selector_all(f"{time_selector_container} li[class*='items-selector-content__item']")
+            time_items = page.query_selector_all(showtime_selector)
             available_times = []
             for item in time_items:
-                time_text = item.inner_text().strip()
-                if time_text:
-                    available_times.append(time_text)
+                # Extract start time
+                start_time_elem = item.query_selector("span.session-time-start")
+                start_time = start_time_elem.inner_text().strip() if start_time_elem else "Unknown start time"
+                
+                # Extract end time (it's the text after the start time within session-time)
+                session_time_elem = item.query_selector("span.session-time")
+                if session_time_elem:
+                    session_time_text = session_time_elem.inner_text().strip()
+                    # Split by " - " to get start and end times
+                    time_parts = session_time_text.split(" - ")
+                    end_time = time_parts[1].strip() if len(time_parts) > 1 else "Unknown end time"
+                else:
+                    end_time = "Unknown end time"
+
+                # Extract screen name
+                screen_elem = item.query_selector("span.session-screen-name")
+                screen = screen_elem.inner_text().strip() if screen_elem else "Unknown screen"
+
+                # Extract attributes (e.g., "Hindi", "Laser")
+                attributes = []
+                language_elem = item.query_selector("span.session-attributes-language span")
+                if language_elem:
+                    attributes.append(language_elem.inner_text().strip())
+                special_elem = item.query_selector("span.session-attributes-special span")
+                if special_elem:
+                    attributes.append(special_elem.inner_text().strip())
+                attributes_str = ", ".join(attributes) if attributes else "No attributes"
+
+                # Combine the information
+                time_info = f"{start_time}{end_time} ({screen}, {attributes_str})"
+                available_times.append(time_info)
+
             if available_times:
                 showtimes_found = True
                 showtimes_by_date[date_text] = available_times
                 print(f"Showtimes for {date_text}: {', '.join(available_times)}")
             else:
                 print(f"No showtimes available for {date_text} (no times listed)")
+                # Log the HTML for debugging
+                time_html = time_container.inner_html()
+                print(f"Time dropdown HTML for {date_text}: {time_html}")
 
             # Reopen date dropdown for the next iteration
             page.click(date_button, force=True)
