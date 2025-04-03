@@ -58,6 +58,7 @@ def scrape_myvue(page, booking):
     url = booking["url"]
     preferences = booking["preferences"]
     booking_type = booking["type"]
+    movie_title = preferences["movie_title"]
 
     page.goto(url, timeout=60000, wait_until="networkidle")
     handle_cookies(page)
@@ -69,19 +70,19 @@ def scrape_myvue(page, booking):
 
     # Step 2: Search and select movie
     click_with_retry(page, "[data-test='quick-book-film-selector'] button[data-test='dropdown-opener']")
-    page.fill("[data-test='quick-book-dropdown-search-input']", preferences["movie_title"])
+    page.fill("[data-test='quick-book-dropdown-search-input']", movie_title)
     page.wait_for_timeout(2000)
 
     film_container = "[data-test='quick-book-film-selector'] ul[class*='items-selector-content']"
     film_items = page.query_selector_all(f"{film_container} li[class*='items-selector-content__item']")
-    target_movie = preferences["movie_title"].lower()
+    target_movie = movie_title.lower().replace(":", "").replace("  ", " ")  # Normalize for matching
     for item in film_items:
-        movie_text = item.inner_text().strip().lower()
+        movie_text = item.inner_text().strip().lower().replace(":", "").replace("  ", " ")
         if target_movie in movie_text or f"{target_movie} (hindi)" in movie_text:
             click_with_retry(page, item)
             break
     else:
-        print(f"Movie {preferences['movie_title']} not found")
+        print(f"Movie {movie_title} not found")
         return False
 
     # Step 3: Check date dropdown
@@ -92,12 +93,12 @@ def scrape_myvue(page, booking):
     if available_dates:
         send_gui_alert(
             f"{booking_type.capitalize()} Booking Available!",
-            "Movie booking has opened, check showtimes and book."
+            f"{movie_title} booking has opened, check showtimes and book."
         )
         print("GUI alert sent: Movie booking has opened, check showtimes and book.")
         return True
     else:
-        print(f"No dates available for {preferences['movie_title']} at {preferences['theater']}")
+        print(f"No dates available for {movie_title} at {preferences['theater']}")
         return False
 
 def main():
