@@ -218,7 +218,15 @@ def scrape_myvue(page, booking):
                 continue
 
             # Wait for the page to update
-            page.wait_for_timeout(3000)  # Increased wait for page to update
+            page.wait_for_timeout(5000)  # Increased wait for page to update
+
+            # Check for loading state
+            loading_selector = "[data-test='quick-book-time-selector'] .loading"
+            try:
+                page.wait_for_selector(loading_selector, state="detached", timeout=10000)
+                print(f"Loading indicator for {date_text} has disappeared")
+            except Exception:
+                print(f"No loading indicator found or it did not disappear for {date_text}")
 
             # Check time dropdown state
             time_selector_container = "[data-test='quick-book-time-selector']"
@@ -227,19 +235,16 @@ def scrape_myvue(page, booking):
             if time_container:
                 time_classes = time_container.get_attribute("class")
                 print(f"Time dropdown classes for {date_text}: {time_classes}")
-                if "quick-book__list-item-disabled" in time_classes:
-                    print(f"No showtimes available for {date_text} (time dropdown disabled)")
-                    # Reopen date dropdown for the next iteration
-                    page.click(date_button, force=True)
-                    page.wait_for_timeout(1000)
-                    continue
+                # Log the inner HTML of the time dropdown for debugging
+                time_html = time_container.inner_html()
+                print(f"Time dropdown HTML for {date_text}: {time_html}")
             else:
                 print(f"Time dropdown not found for {date_text}")
                 page.click(date_button, force=True)
                 page.wait_for_timeout(1000)
                 continue
 
-            # Attempt to open time dropdown
+            # Attempt to open time dropdown regardless of disabled state
             time_element = page.query_selector(time_button)
             try:
                 click_with_retry(page, time_element)
@@ -265,10 +270,6 @@ def scrape_myvue(page, booking):
                 print(f"Showtimes for {date_text}: {', '.join(available_times)}")
             else:
                 print(f"No showtimes available for {date_text} (no times listed)")
-                # Debug: Check if there's a loading state
-                loading_indicator = page.query_selector("[data-test='quick-book-time-selector'] .loading")
-                if loading_indicator:
-                    print(f"Loading indicator present for {date_text}")
 
             # Reopen date dropdown for the next iteration
             page.click(date_button, force=True)
