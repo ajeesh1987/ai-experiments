@@ -20,6 +20,8 @@ Automates parking spot checks for Munich Airport.
 
 ### `general_booking_scraper.py`
 Automates movie showtime checks on the Vue Cinemas website (https://www.myvue.com/).
+
+
 **Features:**
 Searches for a specified movie at a chosen Vue theater.
 Supports flexible movie name matching (e.g., "final reckoning" matches "Mission Impossible: Final Reckoning").
