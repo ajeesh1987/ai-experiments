@@ -1,5 +1,4 @@
 import json
-import time
 import os
 from datetime import datetime
 from playwright.sync_api import sync_playwright
@@ -9,206 +8,96 @@ from tkinter import messagebox
 # Suppress Tkinter deprecation warning
 os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
-# GUI alert function using tkinter
+# GUI alert function
 def send_gui_alert(title, message):
     root = tk.Tk()
-    root.withdraw()  # Hide the main window
+    root.withdraw()
     messagebox.showinfo(title, message)
     root.destroy()
 
+# Load configuration from config.json
 def load_config():
     try:
         with open("config.json", "r") as f:
-            config = json.load(f)
-        print("Loaded config.json:")
-        print(json.dumps(config, indent=4))
-        return config["bookings"]
-    except FileNotFoundError:
-        print("config.json not found. Please create it with booking details.")
-        exit(1)
-    except KeyError:
-        print("Invalid config.json format. Expected a 'bookings' key with a list.")
+            return json.load(f)["bookings"]
+    except (FileNotFoundError, KeyError) as e:
+        print(f"Error loading config.json: {e}")
         exit(1)
 
-def find_element(page, selectors, timeout=5000, retries=3, delay=1):
-    """Try multiple selectors to find an element with retries."""
+# Click an element with retries (accepts selector string or ElementHandle)
+def click_with_retry(page, target, timeout=5000, retries=2):
     for attempt in range(retries):
-        for selector in selectors:
-            try:
-                page.wait_for_selector(selector, timeout=timeout)
-                return selector
-            except:
-                continue
-        print(f"Retry {attempt + 1}/{retries} for selectors: {selectors}")
-        time.sleep(delay)
-    raise Exception(f"Could not find element with selectors: {selectors} after {retries} retries")
+        try:
+            if isinstance(target, str):  # If target is a selector string
+                element = page.wait_for_selector(target, timeout=timeout)
+            else:  # If target is an ElementHandle
+                element = target
+            element.scroll_into_view_if_needed()
+            element.click(force=True)
+            return True
+        except Exception as e:
+            print(f"Click attempt {attempt + 1}/{retries} failed: {e}")
+    raise Exception(f"Failed to click element after {retries} retries")
 
+# Handle cookie popup
 def handle_cookies(page):
     cookie_selectors = [
         "button#onetrust-accept-btn-handler",
         "button:has-text('Accept All Cookies')",
         "button[class*='accept']",
     ]
-    try:
-        cookie_selector = find_element(page, cookie_selectors, timeout=10000)
-        page.click(cookie_selector)
-        print("Cookie popup dismissed")
-        page.wait_for_timeout(1000)
-    except Exception as e:
-        print(f"No cookie popup found or failed to dismiss: {e}")
-
-def click_with_retry(page, element, retries=3, delay=1):
-    """Click an element with retries to handle pointer interception."""
-    for attempt in range(retries):
+    for selector in cookie_selectors:
         try:
-            if element:
-                element.scroll_into_view_if_needed()
-                page.wait_for_timeout(500)
-                element.click(force=True)
-                return True
-            else:
-                raise Exception("Element is None")
-        except Exception as e:
-            print(f"Click attempt {attempt + 1}/{retries} failed: {e}")
-            time.sleep(delay)
-    raise Exception(f"Failed to click element after {retries} retries")
+            click_with_retry(page, selector, timeout=5000)
+            return
+        except:
+            continue
 
-def normalize_text(text):
-    """Normalize text by stripping whitespace and replacing special characters."""
-    return text.strip().replace('\u00A0', ' ').replace('\n', ' ')
-
+# Scrape Vue website for movie availability
 def scrape_myvue(page, booking):
-    global url
     url = booking["url"]
     preferences = booking["preferences"]
     booking_type = booking["type"]
 
-    print(f"Navigating to {url}")
-    try:
-        page.goto(url, timeout=60000, wait_until="networkidle")
-    except Exception as e:
-        print(f"Failed to load page: {e}")
-        page.goto(url, timeout=60000, wait_until="domcontentloaded")
+    page.goto(url, timeout=60000, wait_until="networkidle")
     handle_cookies(page)
 
-    try:
-        # Step 1: Open venue dropdown
-        venue_button = find_element(page, ["button[data-test='dropdown-opener'] span:has-text('VENUE')"])
-        page.click(venue_button)
-        print("Opened venue dropdown")
-        page.wait_for_timeout(3000)
+    # Step 1: Select theater
+    click_with_retry(page, "button[data-test='dropdown-opener'] span:has-text('VENUE')")
+    theater_selector = f"ul.venue-selector-dropdown-content li.dropdown-item:has-text('{preferences['theater']}')"
+    click_with_retry(page, theater_selector)
 
-        # Ensure dropdown is open
-        dropdown_body = find_element(page, ["div.dropdown-body.show"], timeout=10000)
-        print("Dropdown body is visible")
+    # Step 2: Search and select movie
+    click_with_retry(page, "[data-test='quick-book-film-selector'] button[data-test='dropdown-opener']")
+    page.fill("[data-test='quick-book-dropdown-search-input']", preferences["movie_title"])
+    page.wait_for_timeout(2000)
 
-        # Target venue items
-        venue_container = "ul.venue-selector-dropdown-content"
-        venue_items = page.query_selector_all(f"{venue_container} li.dropdown-item:not(.disabled)")
-        print("Available venues:")
-        available_venues = []
-        for item in venue_items:
-            venue_text = item.query_selector("span.dropdown-item__value").inner_text().strip()
-            if venue_text not in available_venues:
-                print(f" - {venue_text}")
-                available_venues.append(venue_text)
+    film_container = "[data-test='quick-book-film-selector'] ul[class*='items-selector-content']"
+    film_items = page.query_selector_all(f"{film_container} li[class*='items-selector-content__item']")
+    target_movie = preferences["movie_title"].lower()
+    for item in film_items:
+        movie_text = item.inner_text().strip().lower()
+        if target_movie in movie_text or f"{target_movie} (hindi)" in movie_text:
+            click_with_retry(page, item)
+            break
+    else:
+        print(f"Movie {preferences['movie_title']} not found")
+        return False
 
-        # Select theater
-        theater = preferences["theater"]
-        venue_selector = f"{venue_container} li.dropdown-item:has-text('{theater}')"
-        elements = page.query_selector_all(venue_selector)
-        if not elements:
-            raise Exception("No matching theater found")
-        for element in elements:
-            if element.is_visible():
-                element.scroll_into_view_if_needed()
-                page.wait_for_timeout(500)
-                element.click(force=True)
-                print(f"Selected theater: {theater}")
-                break
-        else:
-            raise Exception("No visible theater option found")
-
-        # Step 2: Open film dropdown
-        film_button = find_element(page, ["[data-test='quick-book-film-selector'] button[data-test='dropdown-opener']"])
-        page.click(film_button)
-        print("Opened film dropdown")
-        page.wait_for_timeout(5000)
-
-        # Ensure dropdown is open
-        film_dropdown_body = find_element(page, ["[data-test='quick-book-film-selector'] div.dropdown-body.show"], timeout=10000)
-        print("Film dropdown body is visible")
-
-        # Debug: List all available movies
-        film_container = "[data-test='quick-book-film-selector'] ul[class*='items-selector-content']"
-        film_items = page.query_selector_all(f"{film_container} li[class*='items-selector-content__item']")
-        print("Available movies:")
-        available_movies = []
-        for item in film_items:
-            movie_text = normalize_text(item.inner_text())
-            if movie_text:
-                print(f" - {movie_text} (raw: '{item.inner_text()}')")
-                available_movies.append(movie_text)
-
-        # Search for movie with flexible matching
-        film_input = find_element(page, ["[data-test='quick-book-dropdown-search-input']"])
-        page.fill(film_input, preferences["movie_title"])
-        page.wait_for_timeout(3000)
-
-        # Re-check dropdown state
-        page.wait_for_selector("[data-test='quick-book-film-selector'] div.dropdown-body.show", timeout=5000)
-        print("Film dropdown still open after search")
-
-        # Re-fetch dropdown items after search
-        film_items = page.query_selector_all(f"{film_container} li[class*='items-selector-content__item']")
-        print("Movies after search:")
-        movie_found = False
-        target_movie = preferences["movie_title"].lower()
-        for item in film_items:
-            movie_text = normalize_text(item.inner_text()).lower()
-            print(f" - {movie_text} (raw: '{item.inner_text()}')")
-            # Match "Sikandar" with or without "(Hindi)"
-            if target_movie in movie_text or f"{target_movie} (hindi)" in movie_text:
-                click_with_retry(page, item)
-                print(f"Selected movie: {movie_text}")
-                movie_found = True
-                break
-        if not movie_found:
-            error_msg = f"Movie {preferences['movie_title']} not found in dropdown. Available movies: {', '.join(available_movies)}"
-            print(error_msg)
-            return False
-
-        # Step 3: Open date dropdown
-        date_button = find_element(page, ["[data-test='quick-book-date-selector'] button[data-test='dropdown-opener']"])
-        page.click(date_button)
-        print("Opened date dropdown")
-        page.wait_for_timeout(1000)
-
-        # Get all available dates
-        date_container = "[data-test='quick-book-date-selector'] ul[class*='items-selector-content']"
-        date_items = page.query_selector_all(f"{date_container} li[class*='items-selector-content__item']")
-        available_dates = []
-        for item in date_items:
-            date_text = item.inner_text().strip()
-            available_dates.append(date_text)
-        print("Available dates:")
-        for date in available_dates:
-            print(f" - {date}")
-
-        # Step 4: Check if dates are available and send alert
-        if available_dates:
-            send_gui_alert(
-                f"{booking_type.capitalize()} Booking Available!",
-                f"Movie booking has opened, check showtimes and book."
-            )
-            print("GUI alert sent: Movie booking has opened, check showtimes and book.")
-            return True
-        else:
-            print(f"No dates available for {preferences['movie_title']} at {theater}")
-            return False
-
-    except Exception as e:
-        print(f"Error during scraping: {e}")
+    # Step 3: Check date dropdown
+    click_with_retry(page, "[data-test='quick-book-date-selector'] button[data-test='dropdown-opener']")
+    date_items = page.query_selector_all("[data-test='quick-book-date-selector'] ul[class*='items-selector-content'] li[class*='items-selector-content__item']")
+    available_dates = [item.inner_text().strip() for item in date_items if item.inner_text().strip()]
+    
+    if available_dates:
+        send_gui_alert(
+            f"{booking_type.capitalize()} Booking Available!",
+            "Movie booking has opened, check showtimes and book."
+        )
+        print("GUI alert sent: Movie booking has opened, check showtimes and book.")
+        return True
+    else:
+        print(f"No dates available for {preferences['movie_title']} at {preferences['theater']}")
         return False
 
 def main():
@@ -220,16 +109,15 @@ def main():
         context = browser.new_context(viewport={"width": 1280, "height": 720})
         page = context.new_page()
 
-        for booking in bookings:
-            if booking["type"] != "movie":
-                print(f"Skipping {booking['type']} - only 'movie' supported")
-                continue
-            print(f"Checking {booking['type']} booking for {booking['preferences']['movie_title']}...")
-            result = scrape_myvue(page, booking)
-            print(f"Search completed: {result}")
-
-        context.close()
-        browser.close()
+        try:
+            for booking in bookings:
+                if booking["type"] != "movie":
+                    continue
+                result = scrape_myvue(page, booking)
+                print(f"Search completed: {result}")
+        finally:
+            context.close()
+            browser.close()
 
 if __name__ == "__main__":
     main()
